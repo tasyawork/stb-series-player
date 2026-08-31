@@ -11,9 +11,9 @@ const COMMON_PARAMS = {
 const PUBLIC_BASE = import.meta.env.BASE_URL;
 // Локальные файлы для демонстрации: настоящий контент Иви закрыт DRM
 const DEMO_VIDEOS: Record<string, string> = {
-  holod: `${PUBLIC_BASE}video/holod.mov`,
-  dar: `${PUBLIC_BASE}video/dar.mov`,
-  "selskij-detektiv-1-yablonya-razdora": `${PUBLIC_BASE}video/selskij-detektiv.mov`,
+  holod: `${PUBLIC_BASE}video/holod.mp4`,
+  dar: `${PUBLIC_BASE}video/dar.mp4`,
+  "selskij-detektiv-1-yablonya-razdora": `${PUBLIC_BASE}video/selskij-detektiv.mp4`,
 };
 // Логотип и промо-строка приходят из макета: в mobileapi таких полей нет
 const DEMO_TITLE_ART: Record<string, { logo: string; caption?: string }> = {
