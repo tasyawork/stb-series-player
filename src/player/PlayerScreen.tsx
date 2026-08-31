@@ -37,6 +37,8 @@ const HAVE_FUTURE_DATA = 3;
 const BUFFER_GRACE_MS = 500;
 // Если за это время браузер так и не отдал кадр, файл ему не по зубам
 const GIVE_UP_MS = 12000;
+// timeupdate в разных движках приходит неровно, поэтому движение кадров ещё и опрашиваем
+const PLAYBACK_POLL_MS = 200;
 
 type PanelOption = { kind: "quality" | "audio" | "subtitle"; value: string };
 
@@ -72,6 +74,10 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const bufferTimerRef = useRef<number | null>(null);
   const browseOriginRef = useRef<{ season: number; index: number } | null>(null);
+  // Последняя замеченная позиция и факт того, что кадры уже реально ехали:
+  // по ним отличаем идущее воспроизведение от замершего первого кадра
+  const playbackTimeRef = useRef<number | null>(null);
+  const playbackStartedRef = useRef(false);
 
   const episodesBySeason = useMemo(
     () =>
@@ -142,14 +148,39 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
     setVideoStage((stage) => (stage === "unsupported" ? stage : "ready"));
   }, [clearBufferTimer]);
 
+  // Готовность — это не декодированный первый кадр, а поехавшие кадры:
+  // пока currentTime стоит на месте, лоадер остаётся
+  const trackPlayback = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const previous = playbackTimeRef.current;
+    const position = video.currentTime;
+    playbackTimeRef.current = position;
+    if (video.paused || previous === null || position <= previous) return;
+    playbackStartedRef.current = true;
+    markVideoReady();
+  }, [markVideoReady]);
+
+  // playing только обещает движение. Для уже игравшей серии обещанию верим
+  // (иначе лоадер мигал бы после каждой паузы), для первого старта — ждём кадров
+  const handleVideoPlaying = useCallback(() => {
+    playbackTimeRef.current = videoRef.current?.currentTime ?? 0;
+    if (playbackStartedRef.current) markVideoReady();
+  }, [markVideoReady]);
+
   // Короткие подкачки на ходу лоадером не показываем: он всплывает,
-  // только если данных нет дольше порога
+  // только если кадры не двигаются дольше порога
   const markVideoBuffering = useCallback(() => {
     if (bufferTimerRef.current !== null) return;
+    const positionAtStart = videoRef.current?.currentTime ?? null;
     bufferTimerRef.current = window.setTimeout(() => {
       bufferTimerRef.current = null;
       const video = videoRef.current;
-      if (video && video.readyState >= HAVE_FUTURE_DATA) return;
+      if (!video) return;
+      // Пауза по пульту — это не ожидание данных
+      if (video.paused && playbackStartedRef.current) return;
+      const advanced = positionAtStart !== null && video.currentTime > positionAtStart;
+      if (advanced && video.readyState >= HAVE_FUTURE_DATA) return;
       setBuffering(true);
     }, BUFFER_GRACE_MS);
   }, []);
@@ -166,6 +197,8 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
     setVideoStage("loading");
     setBuffering(false);
     clearBufferTimer();
+    playbackTimeRef.current = null;
+    playbackStartedRef.current = false;
     if (videoRef.current) videoRef.current.currentTime = 0;
   }, [clearBufferTimer, episodeId]);
 
@@ -190,11 +223,27 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
     if (!video) return;
     if (!playing) {
       video.pause();
+      // Кадр стоит по воле пользователя — ждать настоящего playing больше нечего
+      if (video.readyState >= HAVE_FUTURE_DATA) markVideoReady();
       return;
     }
-    if (video.readyState >= HAVE_FUTURE_DATA) markVideoReady();
-    void video.play().catch(() => undefined);
+    let abandoned = false;
+    void video.play().catch(() => {
+      // Автоплей отклонён: реального playing не будет, крутить спиннер бессмысленно
+      if (!abandoned) markVideoReady();
+    });
+    return () => {
+      abandoned = true;
+    };
   }, [markVideoReady, playing, episodeId]);
+
+  // Пока лоадер на экране, сами приглядываем за позицией: событий timeupdate
+  // на замершем кадре может не быть вовсе
+  useEffect(() => {
+    if (videoStage !== "loading" || !playing) return;
+    const id = window.setInterval(trackPlayback, PLAYBACK_POLL_MS);
+    return () => window.clearInterval(id);
+  }, [playing, trackPlayback, videoStage]);
 
   useEffect(() => {
     if (!playing || !episode) return;
@@ -496,9 +545,8 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
             onLoadStart={markVideoBuffering}
             onWaiting={markVideoBuffering}
             onStalled={markVideoBuffering}
-            onLoadedData={markVideoReady}
-            onCanPlay={markVideoReady}
-            onPlaying={markVideoReady}
+            onPlaying={handleVideoPlaying}
+            onTimeUpdate={trackPlayback}
             onError={markVideoUnsupported}
           />
         ) : (

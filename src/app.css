@@ -245,7 +245,8 @@ input {
   appearance: none;
 }
 
-/* Ожидание данных: спиннер по центру кадра, поверх постера, но под контролами */
+/* Ожидание данных: спиннер по центру кадра, поверх постера, но под контролами.
+   Тёмный ореол держит спиннер читаемым на светлом застывшем кадре */
 .player-loader {
   position: absolute;
   inset: 0;
@@ -253,6 +254,7 @@ input {
   display: grid;
   place-items: center;
   pointer-events: none;
+  background: radial-gradient(circle at center, rgb(0 0 0 / 0.52), rgb(0 0 0 / 0) 220px);
 }
 
 .player-spinner {
