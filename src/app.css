@@ -204,7 +204,8 @@ input {
     0 0 140px rgb(255 255 255 / 0.07);
 }
 
-.player-video {
+.player-video,
+.player-still {
   position: absolute;
   inset: 0;
   width: 100%;

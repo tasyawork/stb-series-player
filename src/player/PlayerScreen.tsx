@@ -69,6 +69,9 @@ function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
   const [activity, setActivity] = useState(0);
   const [videoStage, setVideoStage] = useState<"loading" | "ready">("loading");
   const [buffering, setBuffering] = useState(false);
+  // Картинка заглушки не загрузилась: в кадре должен остаться ровный тёмный фон,
+  // а не значок битого изображения
+  const [stillBroken, setStillBroken] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const bufferTimerRef = useRef<number | null>(null);
   const toastTimerRef = useRef<number | null>(null);
@@ -119,7 +122,10 @@ function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
     () => playlist.find((item) => item.id === episodeId) ?? playlist[0],
     [episodeId, playlist],
   );
+  // Локальные MP4 есть только у пресетов: настоящий контент Иви закрыт DRM.
+  // Для произвольной ссылки videoUrl пустой, и вместо кадра играет заглушка-скрин
   const src = episode?.videoUrl;
+  const still = src ? "" : episode?.thumb || episode?.poster || series.backdrop || "";
   const duration = episode?.durationSec ?? 0;
 
   // WebKit принимает решение об автоплее при назначении src. Поэтому сначала
@@ -239,14 +245,16 @@ function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
   useEffect(() => {
     playhead.set(0);
     setPlaying(true);
-    applyVideoStage("loading");
+    // Ждать нечего, когда видео и нет: серия без источника сразу «готова»
+    applyVideoStage(src ? "loading" : "ready");
     applyBuffering(false);
     clearBufferTimer();
+    setStillBroken(false);
     playbackTimeRef.current = null;
     playbackStartedRef.current = false;
     gaveUpRef.current = false;
     if (videoRef.current) videoRef.current.currentTime = 0;
-  }, [applyBuffering, applyVideoStage, clearBufferTimer, episodeId, playhead]);
+  }, [applyBuffering, applyVideoStage, clearBufferTimer, episodeId, playhead, src]);
 
   useEffect(
     () => () => {
@@ -303,10 +311,10 @@ function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
   // Пока лоадер на экране, сами приглядываем за позицией: событий timeupdate
   // на замершем кадре может не быть вовсе
   useEffect(() => {
-    if (videoStage !== "loading" || !playing) return;
+    if (videoStage !== "loading" || !playing || !src) return;
     const id = window.setInterval(trackPlayback, PLAYBACK_POLL_MS);
     return () => window.clearInterval(id);
-  }, [playing, trackPlayback, videoStage]);
+  }, [playing, src, trackPlayback, videoStage]);
 
   // Ход времени пишем в playhead, а не в состояние: иначе каждый тик
   // перерисовывал бы весь экран вместе с рельсой серий
@@ -595,24 +603,35 @@ function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
     <>
       {/* Управление только с пульта: мышь внутри плеера отключена в стилях */}
       <div className={`player-wrap${browsing ? " browsing" : ""}${controlsVisible ? "" : " idle"}`}>
-        {/* Видео монтируется сразу и без poster: любой статичный кадр перед стартом
-            выглядит как заглушка, а ожидание и так показывает спиннер */}
-        <video
-          ref={attachVideo}
-          className="player-video"
-          autoPlay
-          muted
-          loop
-          playsInline
-          preload="auto"
-          disableRemotePlayback
-          onLoadStart={markVideoBuffering}
-          onWaiting={markVideoBuffering}
-          onStalled={markVideoBuffering}
-          onPlaying={handleVideoPlaying}
-          onTimeUpdate={trackPlayback}
-          onError={stopWaiting}
-        />
+        {/* Есть локальный файл — видео монтируется сразу и без poster: любой статичный
+            кадр перед стартом выглядит как заглушка, а ожидание и так показывает спиннер.
+            Источника нет — <video> не монтируем вовсе, кадр держит скрин серии */}
+        {src ? (
+          <video
+            ref={attachVideo}
+            className="player-video"
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="auto"
+            disableRemotePlayback
+            onLoadStart={markVideoBuffering}
+            onWaiting={markVideoBuffering}
+            onStalled={markVideoBuffering}
+            onPlaying={handleVideoPlaying}
+            onTimeUpdate={trackPlayback}
+            onError={stopWaiting}
+          />
+        ) : still && !stillBroken ? (
+          <img
+            className="player-still"
+            src={still}
+            alt=""
+            aria-hidden="true"
+            onError={() => setStillBroken(true)}
+          />
+        ) : null}
         {/* Только индикация ожидания: пульт этот слой не видит и навести на него нечего */}
         {showLoader ? (
           <div className="player-loader" role="presentation" aria-hidden="true">
