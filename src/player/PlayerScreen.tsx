@@ -121,6 +121,22 @@ function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
   );
   const src = episode?.videoUrl;
   const duration = episode?.durationSec ?? 0;
+
+  // WebKit принимает решение об автоплее при назначении src. Поэтому сначала
+  // синхронно закрепляем muted как свойство и атрибут, и лишь затем даём источник.
+  const attachVideo = useCallback(
+    (video: HTMLVideoElement | null) => {
+      videoRef.current = video;
+      if (!video) return;
+      video.defaultMuted = true;
+      video.muted = true;
+      video.setAttribute("muted", "");
+      video.playsInline = true;
+      if (src) video.src = src;
+    },
+    [src],
+  );
+
   const focusRow = ROWS.findIndex((row) => (row as readonly string[]).includes(focus));
   const browsing = focusRow >= BROWSE_ROW;
   const showSubscriptionOffer = series.subscriptionRequired && !series.subscriptionActive;
@@ -242,16 +258,15 @@ function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
   useEffect(() => {
     if (videoStage !== "loading" || !src) return;
     const timer = window.setTimeout(() => {
-      const video = videoRef.current;
-      if (video && video.readyState >= HAVE_FUTURE_DATA) markVideoReady();
+      if (playbackStartedRef.current) markVideoReady();
       else markVideoUnsupported();
     }, GIVE_UP_MS);
     return () => window.clearTimeout(timer);
   }, [markVideoReady, markVideoUnsupported, src, videoStage]);
 
   // Демо-видео короче серии, поэтому крутится в цикле, но реагирует на паузу.
-  // Автоплей может быть отклонён: прототип всё равно продолжает «играть» по таймеру,
-  // чтобы в контролах не появилась стартовая иконка запуска
+  // В WebKit ранний play() может быть отклонён до появления декодируемых данных:
+  // повторяем попытку на loadeddata/canplay, не объявляя застывший кадр готовым.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -262,12 +277,27 @@ function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
       return;
     }
     let abandoned = false;
-    void video.play().catch(() => {
-      // Автоплей отклонён: реального playing не будет, крутить спиннер бессмысленно
-      if (!abandoned) markVideoReady();
-    });
+    const tryPlay = () => {
+      if (abandoned) return;
+      video.defaultMuted = true;
+      video.muted = true;
+      video.setAttribute("muted", "");
+      void video.play().catch(() => {
+        // Лоадер остаётся над нативным UI; следующий media event повторит попытку,
+        // а общий 12-секундный предохранитель при необходимости заменит video постером.
+      });
+    };
+    tryPlay();
+    video.addEventListener("loadeddata", tryPlay);
+    video.addEventListener("canplay", tryPlay);
+    const retryId = window.setInterval(() => {
+      if (video.paused) tryPlay();
+    }, PLAYBACK_POLL_MS);
     return () => {
       abandoned = true;
+      window.clearInterval(retryId);
+      video.removeEventListener("loadeddata", tryPlay);
+      video.removeEventListener("canplay", tryPlay);
     };
   }, [markVideoReady, playing, episodeId]);
 
@@ -570,9 +600,8 @@ function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
       <div className={`player-wrap${browsing ? " browsing" : ""}${controlsVisible ? "" : " idle"}`}>
         {showVideo ? (
           <video
-            ref={videoRef}
+            ref={attachVideo}
             className="player-video"
-            src={src}
             poster={posterUrl}
             autoPlay
             muted

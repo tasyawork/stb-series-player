@@ -243,7 +243,18 @@ input {
   background: radial-gradient(circle at center, rgb(0 0 0 / 0.52), rgb(0 0 0 / 0) 220px);
 }
 
+.player-loader::before {
+  content: "";
+  grid-area: 1 / 1;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: #000;
+}
+
 .player-spinner {
+  grid-area: 1 / 1;
+  z-index: 1;
   width: var(--space-fene);
   height: var(--space-fene);
   border-radius: 50%;
