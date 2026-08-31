@@ -231,6 +231,16 @@ input {
   background: #111 center / cover no-repeat;
 }
 
+/* Прототип для ТВ: нативная кнопка запуска и панель WebKit не должны появляться */
+.player-video::-webkit-media-controls,
+.player-video::-webkit-media-controls-panel,
+.player-video::-webkit-media-controls-overlay-play-button,
+.player-video::-webkit-media-controls-start-playback-button {
+  display: none !important;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
 .grad-top,
 .grad-bottom {
   position: absolute;
