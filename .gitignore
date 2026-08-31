@@ -11,7 +11,3 @@ dist-ssr
 .vite
 tsconfig.tsbuildinfo
 .vercel
-
-# Файлы больше 100 МБ GitHub и Vercel не принимают
-public/video/dar.mov
-public/video/selskij-detektiv.mov
