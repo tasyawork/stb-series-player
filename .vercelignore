@@ -1,0 +1,6 @@
+# Vercel CLI иначе заливает локальные .mov по 100+ МБ и падает
+public/video/dar.mov
+public/video/selskij-detektiv.mov
+node_modules
+dist
+.vercel
