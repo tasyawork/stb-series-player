@@ -29,6 +29,8 @@ const CARD_FIELDS = [
   "subscription_names", "localizations", "subtitles", "hd_available",
   "fullhd_available", "uhd_available_all", "has_5_1", "fake", "seasons",
 ].join(",");
+const EPISODE_PAGE_SIZE = 100;
+const MAX_EPISODE_PAGES = 20;
 const EPISODE_FIELDS = [
   "id", "thumbs", "posters", "episode", "season", "title", "fake",
   "ivi_release_info", "localizations", "promo_images",
@@ -95,17 +97,82 @@ type ApiEnvelope<T> = {
   error?: { message?: string; code?: number };
 };
 
-export async function fetchIviSeries(
+/*
+  Мета сериала за сеанс не меняется, а походов в mobileapi на каждый выбор нужно
+  два и больше. Поэтому разобранный ответ держим в памяти: повторный выбор
+  пресета отдаётся мгновенно, а сеть трогаем только если запись состарилась.
+*/
+const CACHE_TTL_MS = 5 * 60 * 1000;
+const seriesCache = new Map<string, { series: IviSeries; at: number }>();
+// Клик и фоновый прогрев могут просить одно и то же: второй запрос ждёт первый
+const inflight = new Map<string, Promise<IviSeries>>();
+
+function cacheKey(query: string, requestedSeason?: number, usePresetVideo = false): string | null {
+  try {
+    return `${parseIviQuery(query).slug}|${requestedSeason ?? ""}|${usePresetVideo ? 1 : 0}`;
+  } catch {
+    return null;
+  }
+}
+
+// Синхронный взгляд в кэш: нужен, чтобы отрисовать сериал в том же кадре, что клик
+export function peekIviSeries(
   query: string,
   requestedSeason?: number,
   usePresetVideo = false,
+): { series: IviSeries; stale: boolean } | null {
+  const key = cacheKey(query, requestedSeason, usePresetVideo);
+  const entry = key ? seriesCache.get(key) : undefined;
+  if (!entry) return null;
+  return { series: entry.series, stale: Date.now() - entry.at > CACHE_TTL_MS };
+}
+
+export function fetchIviSeries(
+  query: string,
+  requestedSeason?: number,
+  usePresetVideo = false,
+): Promise<IviSeries> {
+  const key = cacheKey(query, requestedSeason, usePresetVideo);
+  if (!key) return loadIviSeries(query, requestedSeason, usePresetVideo);
+  const pending = inflight.get(key);
+  if (pending) return pending;
+  const request = loadIviSeries(query, requestedSeason, usePresetVideo)
+    .then((series) => {
+      seriesCache.set(key, { series, at: Date.now() });
+      return series;
+    })
+    .finally(() => {
+      inflight.delete(key);
+    });
+  inflight.set(key, request);
+  return request;
+}
+
+// Прогрев остальных пресетов: ошибку глотаем, это не запрос пользователя
+export async function prefetchIviSeries(
+  query: string,
+  requestedSeason?: number,
+  usePresetVideo = false,
+): Promise<void> {
+  if (peekIviSeries(query, requestedSeason, usePresetVideo)?.stale === false) return;
+  try {
+    await fetchIviSeries(query, requestedSeason, usePresetVideo);
+  } catch {
+    // молча: пресет догрузится по клику
+  }
+}
+
+async function loadIviSeries(
+  query: string,
+  requestedSeason: number | undefined,
+  usePresetVideo: boolean,
 ): Promise<IviSeries> {
   const parsed = parseIviQuery(query);
   const card = await apiGet<Card>("compilationinfo/v7/", {
     hru: parsed.slug,
     fields: CARD_FIELDS,
   });
-  const rawEpisodes = await fetchAllEpisodes(card.id);
+  const rawEpisodes = await fetchAllEpisodes(card.id, card.episode_count);
   if (rawEpisodes.length === 0) {
     throw new Error(`У сериала «${card.title}» не найдены серии`);
   }
@@ -181,21 +248,41 @@ function hasSvod(types?: string[]): boolean {
   return types?.includes("SVOD") ?? false;
 }
 
-async function fetchAllEpisodes(id: number): Promise<RawEpisode[]> {
-  const all: RawEpisode[] = [];
-  const pageSize = 100;
-  for (let from = 0; from < 2000; from += pageSize) {
-    const page = await apiGet<RawEpisode[]>("videofromcompilation/v7/", {
-      id: String(id),
-      fake: "1",
-      from: String(from),
-      to: String(from + pageSize - 1),
-      fields: EPISODE_FIELDS,
-    });
+async function fetchAllEpisodes(id: number, expectedCount?: number): Promise<RawEpisode[]> {
+  // Сколько страниц нужно, видно заранее из episode_count, поэтому известную
+  // часть берём одним пакетом вместо круговой задержки на каждую сотню серий
+  const plannedPages = Math.min(
+    MAX_EPISODE_PAGES,
+    Math.max(1, Math.ceil((expectedCount ?? 0) / EPISODE_PAGE_SIZE)),
+  );
+  const pages = await Promise.all(
+    Array.from({ length: plannedPages }, (_, index) => fetchEpisodePage(id, index)),
+  );
+  const all = pages.flat();
+  // episode_count не считает невышедшие серии: полная последняя страница
+  // значит, что остаток нужно добрать
+  let lastLength = pages[pages.length - 1]?.length ?? 0;
+  for (
+    let index = plannedPages;
+    lastLength === EPISODE_PAGE_SIZE && index < MAX_EPISODE_PAGES;
+    index += 1
+  ) {
+    const page = await fetchEpisodePage(id, index);
     all.push(...page);
-    if (page.length < pageSize) break;
+    lastLength = page.length;
   }
   return all;
+}
+
+function fetchEpisodePage(id: number, index: number): Promise<RawEpisode[]> {
+  const from = index * EPISODE_PAGE_SIZE;
+  return apiGet<RawEpisode[]>("videofromcompilation/v7/", {
+    id: String(id),
+    fake: "1",
+    from: String(from),
+    to: String(from + EPISODE_PAGE_SIZE - 1),
+    fields: EPISODE_FIELDS,
+  });
 }
 
 async function apiGet<T>(path: string, params: Record<string, string>): Promise<T> {

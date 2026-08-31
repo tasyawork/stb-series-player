@@ -189,20 +189,6 @@ input {
   transform-origin: top center;
 }
 
-.player-placeholder {
-  width: var(--player-w);
-  height: var(--player-h);
-  max-width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 16px;
-  background: #0f0f0f;
-  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.1);
-  color: var(--color-axum);
-  font-size: 15px;
-}
-
 .player-wrap {
   width: var(--player-w);
   height: var(--player-h);

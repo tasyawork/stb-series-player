@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchIviSeries } from "./ivi/serverFetch";
+import { fetchIviSeries, peekIviSeries, prefetchIviSeries } from "./ivi/serverFetch";
 import type { IviSeries } from "./ivi/types";
 import { PlayerScreen } from "./player/PlayerScreen";
 
@@ -15,6 +15,8 @@ const EXAMPLES = [
 export function App() {
   const [query, setQuery] = useState(EXAMPLES[0].q);
   const [loaded, setLoaded] = useState(EXAMPLES[0].q);
+  // Подсветка чипа не ждёт сеть: выбор виден в том же кадре, что клик
+  const [selected, setSelected] = useState(EXAMPLES[0].q);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [series, setSeries] = useState<IviSeries | null>(null);
@@ -24,21 +26,39 @@ export function App() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   // После выбора панель остаётся закрытой, пока курсор не уйдёт с неё и не вернётся
   const holdCollapsed = useRef(false);
+  // Быстрые клики по чипам идут внахлёст: ответ отставшего запроса нужно выбросить
+  const requestRef = useRef(0);
 
   const expanded = pinned || hovered || typing;
 
-  async function load(nextQuery: string) {
-    setLoading(true);
-    setError(null);
+  const load = useCallback(async (nextQuery: string) => {
+    const token = (requestRef.current += 1);
+    setSelected(nextQuery);
+    const cached = peekIviSeries(nextQuery, undefined, true);
+    if (cached) {
+      // Закэшированный сериал показываем сразу, не подвешивая клик на сеть
+      setSeries(cached.series);
+      setLoaded(nextQuery);
+      setError(null);
+      setLoading(false);
+      if (!cached.stale) return;
+    } else {
+      setLoading(true);
+      setError(null);
+    }
     try {
-      setSeries(await fetchIviSeries(nextQuery, undefined, true));
+      const fresh = await fetchIviSeries(nextQuery, undefined, true);
+      if (token !== requestRef.current) return;
+      setSeries(fresh);
       setLoaded(nextQuery);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка загрузки");
+      if (token !== requestRef.current) return;
+      // Ревалидация упала, а на экране есть рабочие данные: молчим
+      if (!cached) setError(err instanceof Error ? err.message : "Ошибка загрузки");
     } finally {
-      setLoading(false);
+      if (token === requestRef.current) setLoading(false);
     }
-  }
+  }, []);
 
   function collapse() {
     holdCollapsed.current = true;
@@ -48,9 +68,11 @@ export function App() {
   }
 
   useEffect(() => {
-    void load(EXAMPLES[0].q);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // Прогрев остальных пресетов после первого: переключение уходит в кэш
+    void load(EXAMPLES[0].q).then(() => {
+      for (const item of EXAMPLES.slice(1)) void prefetchIviSeries(item.q, undefined, true);
+    });
+  }, [load]);
 
   // Ссылка на плеер должна быть стабильной, иначе memo на нём ничего не даёт
   const returnFocusToInput = useCallback(() => inputRef.current?.focus(), []);
@@ -81,11 +103,12 @@ export function App() {
               <button
                 key={item.q}
                 type="button"
-                className={`preset-chip${loaded === item.q ? " active" : ""}`}
-                disabled={loading}
+                className={`preset-chip${selected === item.q ? " active" : ""}`}
                 onClick={() => {
                   setQuery(item.q);
-                  collapse();
+                  // Панель не схлопываем: иначе следующий пресет можно выбрать
+                  // только уведя курсор с панели и вернув обратно
+                  setPinned(false);
                   void load(item.q);
                 }}
               >
@@ -109,9 +132,7 @@ export function App() {
               onBlur={() => setTyping(false)}
               placeholder="Ссылка на сериал ivi.ru"
             />
-            <button type="submit" disabled={loading}>
-              {loading ? "Загрузка…" : "Смотреть"}
-            </button>
+            <button type="submit">{loading ? "Загрузка…" : "Смотреть"}</button>
           </form>
         </div>
         </div>
@@ -123,8 +144,17 @@ export function App() {
         {series ? (
           <PlayerScreen key={loaded} series={series} onExit={returnFocusToInput} />
         ) : (
-          <div className="player-placeholder">
-            {loading ? "Загружаем мету из mobileapi Иви…" : "Вставьте ссылку на сериал ivi.ru"}
+          /*
+            До прихода меты кадр плеера уже на месте: заставки с иконкой запуска
+            на первом экране нет, ожидание показывает тот же спиннер, что внутри
+            плеера, поэтому загрузка выглядит одним непрерывным состоянием
+          */
+          <div className="player-wrap">
+            {loading ? (
+              <div className="player-loader" role="presentation" aria-hidden="true">
+                <i className="player-spinner" />
+              </div>
+            ) : null}
           </div>
         )}
       </div>
