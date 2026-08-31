@@ -11,3 +11,4 @@ dist-ssr
 .vite
 tsconfig.tsbuildinfo
 .vercel
+.artifacts

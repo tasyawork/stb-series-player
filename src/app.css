@@ -204,22 +204,17 @@ input {
     0 0 140px rgb(255 255 255 / 0.07);
 }
 
-.player-video,
-.player-poster {
+.player-video {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
-}
-
-.player-poster {
-  background: #111 center / cover no-repeat;
+  background: #000;
 }
 
 /* Прототип для ТВ: нативная кнопка запуска и панель WebKit не должны появляться.
-   Движок рисует их в своём shadow-дереве, поэтому CSS помогает не везде —
-   если файл не проигрывается, <video> заменяется постером в PlayerScreen */
+   Движок рисует их в своём shadow-дереве, поэтому давим все известные части */
 .player-video::-webkit-media-controls,
 .player-video::-webkit-media-controls-enclosure,
 .player-video::-webkit-media-controls-container,
@@ -231,8 +226,8 @@ input {
   appearance: none;
 }
 
-/* Ожидание данных: спиннер по центру кадра, поверх постера, но под контролами.
-   Тёмный ореол держит спиннер читаемым на светлом застывшем кадре */
+/* Ожидание данных: только спиннер по центру кадра, под контролами.
+   Никакой подложки — на светлом кадре его держит читаемым собственная тень */
 .player-loader {
   position: absolute;
   inset: 0;
@@ -240,26 +235,16 @@ input {
   display: grid;
   place-items: center;
   pointer-events: none;
-  background: radial-gradient(circle at center, rgb(0 0 0 / 0.52), rgb(0 0 0 / 0) 220px);
-}
-
-.player-loader::before {
-  content: "";
-  grid-area: 1 / 1;
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  background: #000;
 }
 
 .player-spinner {
   grid-area: 1 / 1;
-  z-index: 1;
   width: var(--space-fene);
   height: var(--space-fene);
   border-radius: 50%;
-  border: 3px solid rgb(255 255 255 / 0.24);
+  border: 3px solid rgb(255 255 255 / 0.32);
   border-top-color: var(--color-sofala);
+  filter: drop-shadow(0 2px 6px rgb(0 0 0 / 0.7));
   animation: player-spin 900ms linear infinite;
 }
 

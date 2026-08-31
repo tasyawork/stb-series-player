@@ -67,9 +67,7 @@ function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
   const [toast, setToast] = useState<string | null>(null);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [activity, setActivity] = useState(0);
-  // unsupported — файл не по зубам браузеру: <video> убираем из разметки целиком,
-  // иначе движок рисует поверх него собственную кнопку запуска
-  const [videoStage, setVideoStage] = useState<"loading" | "ready" | "unsupported">("loading");
+  const [videoStage, setVideoStage] = useState<"loading" | "ready">("loading");
   const [buffering, setBuffering] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const bufferTimerRef = useRef<number | null>(null);
@@ -79,6 +77,8 @@ function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
   // по ним отличаем идущее воспроизведение от замершего первого кадра
   const playbackTimeRef = useRef<number | null>(null);
   const playbackStartedRef = useRef(false);
+  // Предохранитель уже сработал: спиннер больше не поднимаем, показываем видео как есть
+  const gaveUpRef = useRef(false);
   // Копии стадии и буферизации: события видео идут пачками несколько раз в
   // секунду, и по рефам видно, что состояние менять не нужно, без ререндера
   const videoStageRef = useRef(videoStage);
@@ -89,7 +89,7 @@ function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
   playheadRef.current ??= createPlayhead();
   const playhead = playheadRef.current;
 
-  const applyVideoStage = useCallback((next: "loading" | "ready" | "unsupported") => {
+  const applyVideoStage = useCallback((next: "loading" | "ready") => {
     if (videoStageRef.current === next) return;
     videoStageRef.current = next;
     setVideoStage(next);
@@ -184,7 +184,7 @@ function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
   const markVideoReady = useCallback(() => {
     clearBufferTimer();
     applyBuffering(false);
-    if (videoStageRef.current !== "unsupported") applyVideoStage("ready");
+    applyVideoStage("ready");
   }, [applyBuffering, applyVideoStage, clearBufferTimer]);
 
   // Готовность — это не декодированный первый кадр, а поехавшие кадры:
@@ -215,7 +215,7 @@ function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
   // Короткие подкачки на ходу лоадером не показываем: он всплывает,
   // только если кадры не двигаются дольше порога
   const markVideoBuffering = useCallback(() => {
-    if (bufferTimerRef.current !== null) return;
+    if (gaveUpRef.current || bufferTimerRef.current !== null) return;
     const positionAtStart = videoRef.current?.currentTime ?? null;
     bufferTimerRef.current = window.setTimeout(() => {
       bufferTimerRef.current = null;
@@ -229,11 +229,12 @@ function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
     }, BUFFER_GRACE_MS);
   }, [applyBuffering]);
 
-  const markVideoUnsupported = useCallback(() => {
-    clearBufferTimer();
-    applyBuffering(false);
-    applyVideoStage("unsupported");
-  }, [applyBuffering, applyVideoStage, clearBufferTimer]);
+  // Спиннер снимаем и когда кадры так и не поехали: <video> остаётся в разметке,
+  // подменять его постером нечем — заглушка перед видео на первом экране запрещена
+  const stopWaiting = useCallback(() => {
+    gaveUpRef.current = true;
+    markVideoReady();
+  }, [markVideoReady]);
 
   useEffect(() => {
     playhead.set(0);
@@ -243,6 +244,7 @@ function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
     clearBufferTimer();
     playbackTimeRef.current = null;
     playbackStartedRef.current = false;
+    gaveUpRef.current = false;
     if (videoRef.current) videoRef.current.currentTime = 0;
   }, [applyBuffering, applyVideoStage, clearBufferTimer, episodeId, playhead]);
 
@@ -254,15 +256,12 @@ function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
     [clearBufferTimer],
   );
 
-  // Кадры так и не поехали: дальше крутить спиннер бессмысленно, остаёмся на постере
+  // Кадры так и не поехали: дальше крутить спиннер бессмысленно
   useEffect(() => {
     if (videoStage !== "loading" || !src) return;
-    const timer = window.setTimeout(() => {
-      if (playbackStartedRef.current) markVideoReady();
-      else markVideoUnsupported();
-    }, GIVE_UP_MS);
+    const timer = window.setTimeout(stopWaiting, GIVE_UP_MS);
     return () => window.clearTimeout(timer);
-  }, [markVideoReady, markVideoUnsupported, src, videoStage]);
+  }, [src, stopWaiting, videoStage]);
 
   // Демо-видео короче серии, поэтому крутится в цикле, но реагирует на паузу.
   // В WebKit ранний play() может быть отклонён до появления декодируемых данных:
@@ -283,8 +282,8 @@ function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
       video.muted = true;
       video.setAttribute("muted", "");
       void video.play().catch(() => {
-        // Лоадер остаётся над нативным UI; следующий media event повторит попытку,
-        // а общий 12-секундный предохранитель при необходимости заменит video постером.
+        // Следующий media event повторит попытку, а 12-секундный предохранитель
+        // в любом случае уберёт спиннер и оставит на экране сам <video>.
       });
     };
     tryPlay();
@@ -590,35 +589,30 @@ function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
 
   if (!episode) return null;
 
-  const posterUrl = episode.thumb || series.backdrop;
-  const showVideo = Boolean(src) && videoStage !== "unsupported";
-  const showLoader = showVideo && (videoStage === "loading" || buffering);
+  const showLoader = Boolean(src) && (videoStage === "loading" || buffering);
 
   return (
     <>
       {/* Управление только с пульта: мышь внутри плеера отключена в стилях */}
       <div className={`player-wrap${browsing ? " browsing" : ""}${controlsVisible ? "" : " idle"}`}>
-        {showVideo ? (
-          <video
-            ref={attachVideo}
-            className="player-video"
-            poster={posterUrl}
-            autoPlay
-            muted
-            loop
-            playsInline
-            preload="auto"
-            disableRemotePlayback
-            onLoadStart={markVideoBuffering}
-            onWaiting={markVideoBuffering}
-            onStalled={markVideoBuffering}
-            onPlaying={handleVideoPlaying}
-            onTimeUpdate={trackPlayback}
-            onError={markVideoUnsupported}
-          />
-        ) : (
-          <div className="player-poster" style={{ backgroundImage: `url(${posterUrl})` }} />
-        )}
+        {/* Видео монтируется сразу и без poster: любой статичный кадр перед стартом
+            выглядит как заглушка, а ожидание и так показывает спиннер */}
+        <video
+          ref={attachVideo}
+          className="player-video"
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="auto"
+          disableRemotePlayback
+          onLoadStart={markVideoBuffering}
+          onWaiting={markVideoBuffering}
+          onStalled={markVideoBuffering}
+          onPlaying={handleVideoPlaying}
+          onTimeUpdate={trackPlayback}
+          onError={stopWaiting}
+        />
         {/* Только индикация ожидания: пульт этот слой не видит и навести на него нечего */}
         {showLoader ? (
           <div className="player-loader" role="presentation" aria-hidden="true">
