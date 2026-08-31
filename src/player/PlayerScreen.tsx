@@ -31,6 +31,13 @@ type Focus =
 const CONTROLS_ROW = 1;
 const BROWSE_ROW = 3;
 
+// HTMLMediaElement.HAVE_FUTURE_DATA: с этого момента есть чем показать следующий кадр
+const HAVE_FUTURE_DATA = 3;
+// Порог, за которым пауза в подкачке считается настоящей, а не рябью между кадрами
+const BUFFER_GRACE_MS = 500;
+// Если за это время браузер так и не отдал кадр, файл ему не по зубам
+const GIVE_UP_MS = 12000;
+
 type PanelOption = { kind: "quality" | "audio" | "subtitle"; value: string };
 
 type PlayerScreenProps = {
@@ -58,7 +65,12 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
   const [toast, setToast] = useState<string | null>(null);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [activity, setActivity] = useState(0);
+  // unsupported — файл не по зубам браузеру: <video> убираем из разметки целиком,
+  // иначе движок рисует поверх него собственную кнопку запуска
+  const [videoStage, setVideoStage] = useState<"loading" | "ready" | "unsupported">("loading");
+  const [buffering, setBuffering] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const bufferTimerRef = useRef<number | null>(null);
   const browseOriginRef = useRef<{ season: number; index: number } | null>(null);
 
   const episodesBySeason = useMemo(
@@ -79,6 +91,7 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
     () => playlist.find((item) => item.id === episodeId) ?? playlist[0],
     [episodeId, playlist],
   );
+  const src = episode?.videoUrl;
   const focusRow = ROWS.findIndex((row) => (row as readonly string[]).includes(focus));
   const browsing = focusRow >= BROWSE_ROW;
   const showSubscriptionOffer = series.subscriptionRequired && !series.subscriptionActive;
@@ -117,19 +130,71 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
     setActivity((value) => value + 1);
   }, []);
 
+  const clearBufferTimer = useCallback(() => {
+    if (bufferTimerRef.current === null) return;
+    window.clearTimeout(bufferTimerRef.current);
+    bufferTimerRef.current = null;
+  }, []);
+
+  const markVideoReady = useCallback(() => {
+    clearBufferTimer();
+    setBuffering(false);
+    setVideoStage((stage) => (stage === "unsupported" ? stage : "ready"));
+  }, [clearBufferTimer]);
+
+  // Короткие подкачки на ходу лоадером не показываем: он всплывает,
+  // только если данных нет дольше порога
+  const markVideoBuffering = useCallback(() => {
+    if (bufferTimerRef.current !== null) return;
+    bufferTimerRef.current = window.setTimeout(() => {
+      bufferTimerRef.current = null;
+      const video = videoRef.current;
+      if (video && video.readyState >= HAVE_FUTURE_DATA) return;
+      setBuffering(true);
+    }, BUFFER_GRACE_MS);
+  }, []);
+
+  const markVideoUnsupported = useCallback(() => {
+    clearBufferTimer();
+    setBuffering(false);
+    setVideoStage("unsupported");
+  }, [clearBufferTimer]);
+
   useEffect(() => {
     setCurrent(0);
     setPlaying(true);
+    setVideoStage("loading");
+    setBuffering(false);
+    clearBufferTimer();
     if (videoRef.current) videoRef.current.currentTime = 0;
-  }, [episodeId]);
+  }, [clearBufferTimer, episodeId]);
 
-  // Демо-видео короче серии, поэтому крутится в цикле, но реагирует на паузу
+  useEffect(() => clearBufferTimer, [clearBufferTimer]);
+
+  // Кадры так и не поехали: дальше крутить спиннер бессмысленно, остаёмся на постере
+  useEffect(() => {
+    if (videoStage !== "loading" || !src) return;
+    const timer = window.setTimeout(() => {
+      const video = videoRef.current;
+      if (video && video.readyState >= HAVE_FUTURE_DATA) markVideoReady();
+      else markVideoUnsupported();
+    }, GIVE_UP_MS);
+    return () => window.clearTimeout(timer);
+  }, [markVideoReady, markVideoUnsupported, src, videoStage]);
+
+  // Демо-видео короче серии, поэтому крутится в цикле, но реагирует на паузу.
+  // Автоплей может быть отклонён: прототип всё равно продолжает «играть» по таймеру,
+  // чтобы в контролах не появилась стартовая иконка запуска
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (playing) void video.play().catch(() => undefined);
-    else video.pause();
-  }, [playing, episodeId]);
+    if (!playing) {
+      video.pause();
+      return;
+    }
+    if (video.readyState >= HAVE_FUTURE_DATA) markVideoReady();
+    void video.play().catch(() => undefined);
+  }, [markVideoReady, playing, episodeId]);
 
   useEffect(() => {
     if (!playing || !episode) return;
@@ -408,29 +473,43 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
   if (!episode) return null;
 
   const progress = episode.durationSec ? current / episode.durationSec : 0;
-  const src = episode.videoUrl;
+  const posterUrl = episode.thumb || series.backdrop;
+  const showVideo = Boolean(src) && videoStage !== "unsupported";
+  const showLoader = showVideo && (videoStage === "loading" || buffering);
 
   return (
     <>
       {/* Управление только с пульта: мышь внутри плеера отключена в стилях */}
       <div className={`player-wrap${browsing ? " browsing" : ""}${controlsVisible ? "" : " idle"}`}>
-        {src ? (
+        {showVideo ? (
           <video
             ref={videoRef}
             className="player-video"
             src={src}
-            poster={episode.thumb || series.backdrop}
+            poster={posterUrl}
             autoPlay
             muted
             loop
             playsInline
+            preload="auto"
+            disableRemotePlayback
+            onLoadStart={markVideoBuffering}
+            onWaiting={markVideoBuffering}
+            onStalled={markVideoBuffering}
+            onLoadedData={markVideoReady}
+            onCanPlay={markVideoReady}
+            onPlaying={markVideoReady}
+            onError={markVideoUnsupported}
           />
         ) : (
-          <div
-            className="player-poster"
-            style={{ backgroundImage: `url(${episode.thumb || series.backdrop})` }}
-          />
+          <div className="player-poster" style={{ backgroundImage: `url(${posterUrl})` }} />
         )}
+        {/* Только индикация ожидания: пульт этот слой не видит и навести на него нечего */}
+        {showLoader ? (
+          <div className="player-loader" role="presentation" aria-hidden="true">
+            <i className="player-spinner" />
+          </div>
+        ) : null}
         <div className="grad-top" />
         <div className="grad-bottom" />
         {/* Затемнение из макета: linear 180deg, чёрный 0.55 сверху к 1 снизу */}

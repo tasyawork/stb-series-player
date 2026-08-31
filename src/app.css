@@ -231,14 +231,49 @@ input {
   background: #111 center / cover no-repeat;
 }
 
-/* Прототип для ТВ: нативная кнопка запуска и панель WebKit не должны появляться */
+/* Прототип для ТВ: нативная кнопка запуска и панель WebKit не должны появляться.
+   Движок рисует их в своём shadow-дереве, поэтому CSS помогает не везде —
+   если файл не проигрывается, <video> заменяется постером в PlayerScreen */
 .player-video::-webkit-media-controls,
+.player-video::-webkit-media-controls-enclosure,
+.player-video::-webkit-media-controls-container,
 .player-video::-webkit-media-controls-panel,
 .player-video::-webkit-media-controls-overlay-play-button,
 .player-video::-webkit-media-controls-start-playback-button {
   display: none !important;
   -webkit-appearance: none;
   appearance: none;
+}
+
+/* Ожидание данных: спиннер по центру кадра, поверх постера, но под контролами */
+.player-loader {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.player-spinner {
+  width: var(--space-fene);
+  height: var(--space-fene);
+  border-radius: 50%;
+  border: 3px solid rgb(255 255 255 / 0.24);
+  border-top-color: var(--color-sofala);
+  animation: player-spin 900ms linear infinite;
+}
+
+@keyframes player-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-spinner {
+    animation-duration: 2400ms;
+  }
 }
 
 .grad-top,
