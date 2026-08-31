@@ -1,6 +1,7 @@
 export default async function handler(request, response) {
   const incoming = new URL(request.url, "http://localhost");
-  const path = incoming.pathname.replace(/^\/api\/ivi\/?/, "");
+  const path = incoming.searchParams.get("p") || "";
+  incoming.searchParams.delete("p");
   const target = new URL(`https://api.ivi.ru/mobileapi/${path}`);
   incoming.searchParams.forEach((value, key) => target.searchParams.set(key, value));
 

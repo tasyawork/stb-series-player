@@ -204,7 +204,8 @@ async function apiGet<T>(path: string, params: Record<string, string>): Promise<
     try {
       const url = host.startsWith("http")
         ? new URL(`${host}/${path}`)
-        : new URL(`${host}/${path}`, window.location.origin);
+        : new URL(host, window.location.origin);
+      if (!host.startsWith("http")) url.searchParams.set("p", path);
       Object.entries({ ...COMMON_PARAMS, ...params }).forEach(([key, value]) => {
         url.searchParams.set(key, value);
       });
