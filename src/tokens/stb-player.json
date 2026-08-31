@@ -1,0 +1,166 @@
+{
+  "atom": {
+    "color": {
+      "sofia": "#dbd9e0",
+      "madrid": "#f30745",
+      "axum": "#8f8f8f",
+      "alexandria": "#00a5ff",
+      "beirut": "#00bf4c",
+      "sofala": "#ffffff",
+      "rome": "#e6ae2e",
+      "tbilisi": "#e0e0e0",
+      "ibiza": "#08060e",
+      "suakin": "#100f14",
+      "varna": "#1c1a23",
+      "qualityBadge": "#73a32f"
+    },
+    "opacity": {
+      "odo": 0,
+      "hojo": 0.04,
+      "jabe": 0.08,
+      "rajol": 0.12,
+      "bana": 0.16,
+      "neba": 0.2,
+      "kurza": 0.24,
+      "akbu": 0.32,
+      "pake": 0.4,
+      "tesa": 0.48,
+      "zeton": 0.56,
+      "anie": 0.64,
+      "hemza": 0.72,
+      "sedra": 0.8,
+      "dere": 0.88,
+      "adra": 0.92,
+      "kima": 0.96,
+      "imi": 1
+    },
+    "rounding": {
+      "poster": 0,
+      "posterAlt": 12,
+      "posterInner": 8,
+      "horizontalPoster": 8,
+      "horizontalPosterAlt": 12,
+      "tile": 0,
+      "blankBar": 0,
+      "misc": 0
+    },
+    "length": {
+      "nolom": 0,
+      "chib": 2,
+      "bizat": 4,
+      "stitt": 6,
+      "osha": 8,
+      "sune": 10,
+      "lit": 12,
+      "nuchi": 16,
+      "hurasi": 20,
+      "mara": 24,
+      "riffis": 28,
+      "suffi": 32,
+      "fene": 40,
+      "chak": 48,
+      "nathi": 56,
+      "zass": 64,
+      "fipara": 72,
+      "drap": 80,
+      "mane": 96,
+      "anott": 128,
+      "sinir": 160
+    }
+  },
+  "molecule": {
+    "typo": {
+      "kleodora": {
+        "font": "$atom.fontName.common",
+        "style": "$atom.fontStyle.normal",
+        "size": 13,
+        "line": 16,
+        "weight": "$atom.fontWeight.regular"
+      },
+      "amphiris": {
+        "font": "$atom.fontName.common",
+        "style": "$atom.fontStyle.normal",
+        "size": 15,
+        "line": 20,
+        "weight": "$atom.fontWeight.medium"
+      },
+      "crephusa": {
+        "font": "$atom.fontName.common",
+        "style": "$atom.fontStyle.normal",
+        "size": 24,
+        "line": 28,
+        "weight": "$atom.fontWeight.bold"
+      }
+    }
+  },
+  "organism": {
+    "seekbar": {
+      "pointFillColor": "$atom.color.rome",
+      "timelabel": "kleodora"
+    },
+    "progressOverlay": {
+      ".common": {
+        "barHeight": 2,
+        "barOffsetLeft": 0,
+        "barOffsetRight": 0,
+        "barOffsetBottom": 0,
+        "barValueHeight": 2,
+        "floodFillGradient": {
+          "startColor": [
+            "$atom.color.madrid",
+            "$atom.opacity.odo"
+          ],
+          "endColor": [
+            "$atom.color.madrid",
+            "$atom.opacity.kurza"
+          ],
+          "startPoint": [
+            0.5,
+            0
+          ],
+          "endPoint": [
+            0.5,
+            1
+          ],
+          "angle": 180
+        }
+      },
+      ".criteria": [
+        "style"
+      ],
+      "style": {
+        "brank": {
+          "barFillColor": [
+            "$atom.color.sofia",
+            "$atom.opacity.odo"
+          ],
+          "barValueFillColor": "$atom.color.madrid"
+        }
+      }
+    },
+    "colorBadge": {
+      ".common": {
+        "width": 12,
+        "height": 4,
+        "rounding": 2
+      },
+      ".criteria": [
+        "style"
+      ],
+      "style": {
+        "red": {
+          "fillColor": "$atom.color.madrid"
+        },
+        "green": {
+          "fillColor": "$atom.color.beirut"
+        },
+        "yellow": {
+          "fillColor": "$atom.color.rome"
+        },
+        "blue": {
+          "fillColor": "$atom.color.alexandria"
+        }
+      }
+    }
+  }
+}

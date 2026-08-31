@@ -1,0 +1,976 @@
+@font-face {
+  font-family: "iviSansBase";
+  src: local("IVI Sans Base"), local("iviSans"), local("ivi Sans");
+  font-weight: 400 700;
+  font-style: normal;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+  background: #000;
+  color: var(--color-sofia);
+  font-family: var(--font-ivi);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input {
+  font-family: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* Нижний запас под увеличенный плеер: он растёт вниз от верхнего края */
+  padding: 20px 16px 120px;
+  background: #000;
+}
+
+.picker {
+  display: flex;
+  justify-content: center;
+  width: var(--player-w);
+  max-width: 100%;
+  height: 40px;
+  margin-bottom: 16px;
+  /* Курсор ловит только плашка, поэтому в свёрнутом виде это площадь кнопки */
+  pointer-events: none;
+}
+
+/*
+  Вся панель — одна форма. Свёрнутая, она равна кнопке «Выбрать сериал»,
+  раскрытая — растягивается на ширину плеера и открывает контролы,
+  которые она до этого обрезала. Базовые правила описывают переход
+  в свёрнутое состояние, правила .expanded — обратный.
+*/
+.picker-plate {
+  position: relative;
+  width: 180px;
+  height: 40px;
+  border-radius: 12px;
+  background: #171717;
+  overflow: hidden;
+  pointer-events: auto;
+  transition:
+    width 900ms cubic-bezier(0.22, 1, 0.28, 1),
+    background 520ms ease 260ms;
+}
+
+/* Раскрытие быстрее схлопывания: иначе между исчезновением подписи и
+   появлением контролов возникает пустая пауза */
+.picker.expanded .picker-plate {
+  width: var(--player-w);
+  background: transparent;
+  transition:
+    width 620ms cubic-bezier(0.22, 1, 0.28, 1),
+    background 280ms ease;
+}
+
+.picker-toggle {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-sofia);
+  font-size: 15px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: opacity 420ms ease 420ms;
+}
+
+.picker.expanded .picker-toggle {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+.picker-items {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: var(--player-w);
+  transform: translateX(-50%);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 300ms ease;
+}
+
+.picker.expanded .picker-items {
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 220ms ease 40ms;
+}
+
+.preset-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.preset-chip {
+  height: 40px;
+  border: 0;
+  border-radius: 12px;
+  padding: 0 14px;
+  background: transparent;
+  color: var(--color-sofia);
+  font-size: 15px;
+  cursor: pointer;
+  transition: background var(--duration-focus) ease, color var(--duration-focus) ease;
+}
+
+.preset-chip.active {
+  background: var(--color-segment-selected);
+  color: var(--color-sofala);
+}
+
+.preset-chip:disabled {
+  cursor: default;
+}
+
+.link-row {
+  width: 360px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.link-row input {
+  flex: 1;
+  height: 40px;
+  border: 0;
+  border-radius: 12px;
+  padding: 0 14px;
+  background: #171717;
+  color: var(--color-sofala);
+  font-size: 15px;
+}
+
+.link-row button {
+  height: 40px;
+  border: 0;
+  border-radius: 12px;
+  padding: 0 18px;
+  background: var(--color-segment-selected);
+  color: var(--color-sofala);
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.search-error {
+  width: var(--player-w);
+  max-width: 100%;
+  margin-bottom: 12px;
+  color: #ff6e94;
+  font-size: 13px;
+}
+
+/*
+  Масштаб вместо width/height: внутренняя раскладка плеера привязана
+  к абсолютным координатам макета 960×540 и при смене размеров разъехалась бы.
+*/
+.player-stage {
+  transform: scale(1.2);
+  transform-origin: top center;
+}
+
+.player-placeholder {
+  width: var(--player-w);
+  height: var(--player-h);
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+  background: #0f0f0f;
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.1);
+  color: var(--color-axum);
+  font-size: 15px;
+}
+
+.player-wrap {
+  width: var(--player-w);
+  height: var(--player-h);
+  position: relative;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #000;
+  /* Прототип для ТВ: внутри плеера управляет только пульт, мышь ничего не делает */
+  pointer-events: none;
+  /* Тёмные кадры иначе сливаются с чёрным фоном страницы */
+  box-shadow:
+    0 0 48px rgb(255 255 255 / 0.12),
+    0 0 140px rgb(255 255 255 / 0.07);
+}
+
+.player-video,
+.player-poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.player-poster {
+  background: #111 center / cover no-repeat;
+}
+
+.grad-top,
+.grad-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}
+
+.grad-top {
+  top: 0;
+  height: 96px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.72), transparent);
+}
+
+.grad-bottom {
+  bottom: 0;
+  height: 300px;
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.88));
+}
+
+.player-wrap.browsing .grad-bottom {
+  opacity: var(--opacity-odo);
+}
+
+/* Полноэкранное затемнение под блоком сезонов и серий (STB_Controls_Series) */
+.scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.55) 0%, rgb(0, 0, 0) 100%);
+  transition: opacity var(--duration-scrim) ease;
+}
+
+.player-wrap.browsing .scrim {
+  opacity: 1;
+}
+
+.controls-layer,
+.grad-bottom {
+  transition: opacity var(--duration-scrim) ease;
+}
+
+.player-wrap.browsing .controls-layer {
+  opacity: var(--opacity-odo);
+  pointer-events: none;
+}
+
+.player-wrap.idle .controls-layer,
+.player-wrap.idle .series-layer,
+.player-wrap.idle .grad-top,
+.player-wrap.idle .grad-bottom {
+  opacity: var(--opacity-odo);
+  pointer-events: none;
+}
+
+.top-meta {
+  position: absolute;
+  left: 68px;
+  top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 2;
+}
+
+.top-meta h2 {
+  margin: 0;
+  font-size: var(--typo-title-size);
+  line-height: var(--typo-title-line);
+  font-weight: 700;
+  color: var(--color-sofala);
+}
+
+/* Блок названия из макета: логотип 212×68 и промо-строка Oswald 24|28 */
+.title-art {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.title-art img {
+  display: block;
+  width: 212px;
+  height: 68px;
+}
+
+.title-art p {
+  margin: 0;
+  font-family: "Oswald", var(--font-ivi);
+  font-weight: 400;
+  font-size: 24px;
+  line-height: 28px;
+  color: var(--color-sofala);
+  white-space: nowrap;
+}
+
+.top-meta:has(.title-art) {
+  gap: 16px;
+}
+
+.top-meta span {
+  font-size: var(--typo-kleodora-size);
+  line-height: var(--typo-kleodora-line);
+  color: var(--color-sofia);
+}
+
+.back-btn {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  width: 68px;
+  height: 68px;
+  border: 0;
+  background: transparent;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 24px;
+  cursor: pointer;
+}
+
+.back-btn img {
+  width: 20px;
+  height: 20px;
+  opacity: var(--opacity-hemza);
+  transition: opacity var(--duration-focus) ease;
+}
+
+.back-btn.focused img {
+  opacity: var(--opacity-imi);
+}
+
+.transport {
+  position: absolute;
+  left: 68px;
+  top: 396px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  z-index: 3;
+}
+
+.icon-btn {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 32px;
+  background: transparent;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  padding: 10px;
+  transition: background var(--duration-focus) ease;
+}
+
+.icon-btn.focused {
+  background: var(--color-madrid);
+}
+
+.icon-btn img,
+.control-btn img {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+
+.pause-btn {
+  width: 56px;
+  height: 56px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background var(--duration-focus) ease;
+}
+
+.pause-btn img {
+  width: 20px;
+  height: 20px;
+}
+
+.pause-btn.focused {
+  background: var(--color-madrid);
+}
+
+/* ControlButton из макета, 40px по высоте: плейсхолдер 4 + gap 6 заменены отступом сверху,
+   дальше ряд иконка+подпись 20 и colorBadge 12×4 */
+.side-controls {
+  position: absolute;
+  top: 404px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px 0;
+  overflow: hidden;
+  border-radius: 12px;
+  transition: background var(--duration-focus) ease;
+}
+
+.side-controls.focused {
+  background: var(--color-madrid);
+}
+
+/* Nebula: colorBadge скрывается, когда контрол в фокусе */
+.side-controls.focused .badge {
+  opacity: var(--opacity-odo);
+}
+
+/* Аудио выровнено по правой границе таймлайна (68 + 824 = 892), качество примыкает слева */
+.side-controls.quality {
+  left: 563px;
+}
+
+.side-controls.audio {
+  left: 693px;
+}
+
+.control-btn {
+  border: 0;
+  background: transparent;
+  color: var(--color-sofia);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.control-btn span {
+  font-size: var(--typo-amphiris-size);
+  line-height: var(--typo-amphiris-line);
+  font-weight: 500;
+  text-align: center;
+}
+
+.side-controls.quality .control-btn span {
+  width: 70px;
+}
+
+.side-controls.audio .control-btn span {
+  width: 139px;
+}
+
+.badge {
+  width: var(--color-badge-w);
+  height: var(--color-badge-h);
+  border-radius: 2px;
+  transition: opacity var(--duration-focus) ease;
+}
+
+.badge.green {
+  background: var(--color-qualityBadge);
+}
+
+.badge.blue {
+  background: var(--color-alexandria);
+}
+
+.seekbar {
+  position: absolute;
+  left: 7.08%;
+  right: 7.08%;
+  bottom: 7.41%;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 0;
+}
+
+.seekbar time {
+  width: 52px;
+  font-size: var(--typo-kleodora-size);
+  line-height: var(--typo-kleodora-line);
+  color: var(--color-sofia);
+  font-variant-numeric: tabular-nums;
+}
+
+.seekbar time:last-of-type {
+  text-align: right;
+}
+
+.track {
+  flex: 1;
+  height: 20px;
+  position: relative;
+  /* Запас справа: в конце полосы бегунок выходит за край дорожки на 8px */
+  margin-right: 16px;
+}
+
+.track-bg,
+.track-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 8px;
+  height: 4px;
+  border-radius: 2px;
+}
+
+.track-bg {
+  background: color-mix(in srgb, var(--color-sofia) 32%, transparent);
+}
+
+/* Nebula seekbar damhrogu: вне фокуса белый прогресс, в фокусе — madrid */
+.track-fill {
+  right: auto;
+  background: var(--color-sofala);
+  transition: background var(--duration-focus) ease;
+}
+
+.thumb {
+  position: absolute;
+  top: 2px;
+  width: 16px;
+  height: 16px;
+  margin-left: -8px;
+  border-radius: 50%;
+  background: var(--color-sofala);
+  transition: background var(--duration-focus) ease;
+}
+
+.seekbar.focused .track-fill,
+.seekbar.focused .thumb {
+  background: var(--color-madrid);
+}
+
+.marker {
+  position: absolute;
+  top: 8px;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: 50%;
+  background: var(--color-rome);
+}
+
+/* Блок сезонов и серий: Frame 2136139632 в макете (x 68, y 220, 944×216) */
+.series-layer {
+  position: absolute;
+  left: 68px;
+  /* rail начинается на y=516: у плеера остаются видны нижние 24px постеров */
+  top: 452px;
+  width: 944px;
+  /*
+    Полоса идёт от x=68 до 68px от правого края плеера: 960 − 68 × 2 = 824.
+    По этой границе прижимаются последний таб сезона и последняя карточка серии.
+  */
+  --row-w: 824px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  z-index: 4;
+  pointer-events: none;
+  transition: opacity var(--duration-scrim) ease, top var(--duration-scrim) ease;
+}
+
+.series-layer.open {
+  top: 228px;
+  opacity: 1;
+}
+
+.series-layer:not(.open) .season-tabs,
+.series-layer:not(.open) .series-actions {
+  opacity: 0;
+}
+
+/* Уехавшие влево табы уходят за край плеера, а не режутся по границе блока */
+.season-tabs {
+  width: var(--row-w);
+  overflow: visible;
+}
+
+.season-track {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  transition: transform var(--duration-focus) ease;
+}
+
+/* SegmentControlItem из Figma 1299:10342 */
+.segment-item {
+  height: 40px;
+  border: 0;
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  overflow: hidden;
+  background: transparent;
+  color: var(--color-sofia);
+  font-size: var(--typo-eralato-size);
+  line-height: var(--typo-eralato-line);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--duration-focus) ease, color var(--duration-focus) ease;
+}
+
+.segment-item.selected {
+  background: var(--color-segment-selected);
+}
+
+.segment-item.focused {
+  background: var(--color-madrid);
+  color: var(--color-sofala);
+}
+
+/* Ряд не обрезается: серии уходят за края плеера, границей служит сам плеер */
+.rail-viewport {
+  width: var(--row-w);
+  overflow: visible;
+}
+
+.rail {
+  display: flex;
+  gap: 16px;
+  height: 152px;
+  transition: transform var(--duration-focus) ease;
+}
+
+.rail-loading {
+  height: 152px;
+  display: flex;
+  align-items: center;
+  color: var(--color-axum);
+  font-size: 15px;
+}
+
+/* Button_STB «Уведомлять»: Default прозрачный, выбранный jaffa, фокус madrid */
+.series-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  transition: opacity var(--duration-focus) ease;
+}
+
+.notify-btn {
+  align-self: flex-start;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-sofia);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--duration-focus) ease, color var(--duration-focus) ease;
+}
+
+.notify-btn.active {
+  background: var(--color-jaffa);
+  border-radius: 12px;
+}
+
+.notify-btn.focused {
+  background: var(--color-madrid);
+  border-radius: 12px;
+  color: var(--color-sofala);
+}
+
+/* В макете иконка лежит в боксе 16×16, глиф внутри 14.4px по центру */
+.notify-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  padding: 2px 0;
+}
+
+.notify-icon img {
+  width: 14.4px;
+  height: 16px;
+  display: block;
+}
+
+.notify-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.notify-title {
+  font-size: var(--typo-amphiris-size);
+  line-height: var(--typo-amphiris-line);
+  font-weight: 500;
+}
+
+.notify-caption {
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 500;
+  opacity: var(--opacity-hemza);
+}
+
+/* Button_STB Subscription из Figma 1299:14143 */
+.subscription-btn {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-sofia);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--duration-focus) ease, color var(--duration-focus) ease;
+}
+
+.subscription-btn.focused {
+  background: var(--color-madrid);
+  border-radius: 16px;
+  color: var(--color-sofala);
+}
+
+.subscription-icon {
+  display: flex;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.subscription-icon img {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.subscription-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.subscription-title {
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 500;
+}
+
+.subscription-caption {
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 500;
+  opacity: var(--opacity-hemza);
+}
+
+.episode-card {
+  width: 178px;
+  flex: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  color: var(--color-axum);
+}
+
+.episode-card.current {
+  color: var(--color-sofia);
+}
+
+.poster {
+  width: 178px;
+  height: 100px;
+  border-radius: 16px;
+  overflow: hidden;
+  position: relative;
+  background: #222;
+}
+
+.poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Свёрнутый ряд не гасим прозрачностью — затемняем сами постеры */
+.poster::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-scrim) ease;
+}
+
+.series-layer:not(.open) .poster::after {
+  opacity: var(--opacity-pake);
+}
+
+/* Episode / CoomingSoon: подпись даты — Ctrl/15|20 M поверх затемнённого кадра */
+.availability-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-ivi);
+  color: var(--color-sofala);
+  font-size: var(--typo-amphiris-size);
+  line-height: var(--typo-amphiris-line);
+  font-weight: 500;
+  text-align: center;
+  white-space: nowrap;
+  text-shadow: 0 0 8.8px #000;
+}
+
+.episode-card.availability-upcoming .poster,
+.episode-card.availability-unavailable .poster,
+.episode-card.locked .poster {
+  background: #000;
+}
+
+.episode-card.availability-upcoming .poster > img,
+.episode-card.availability-unavailable .poster > img,
+.episode-card.locked .poster > img {
+  opacity: var(--opacity-akbu);
+}
+
+.episode-card.availability-upcoming p,
+.episode-card.availability-unavailable p,
+.episode-card.locked p {
+  color: var(--color-axum);
+}
+
+.availability-overlay .lock-icon {
+  width: 20px;
+  height: 20px;
+  opacity: 1;
+}
+
+.episode-card small.empty {
+  opacity: 0;
+}
+
+.poster-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  z-index: 2;
+  background: transparent;
+}
+
+.poster-progress span {
+  display: block;
+  height: 2px;
+  background: var(--color-madrid);
+}
+
+.episode-card p {
+  margin: 12px 0 0;
+  font-size: var(--typo-amphiris-size);
+  line-height: var(--typo-amphiris-line);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.episode-card small {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 16px;
+  color: rgb(255 255 255 / 0.56);
+}
+
+.episode-card.focused .poster {
+  outline: 2px solid var(--color-sofala);
+  outline-offset: 4px;
+}
+
+.panel {
+  position: absolute;
+  right: 48px;
+  bottom: 120px;
+  z-index: 5;
+  min-width: 220px;
+  background: rgba(16, 15, 20, 0.92);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.panel h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.panel-item {
+  color: var(--color-sofia);
+  padding: 8px;
+  border-radius: 8px;
+  transition: background var(--duration-focus) ease, color var(--duration-focus) ease;
+}
+
+.panel-item.active {
+  background: var(--color-segment-selected);
+}
+
+.panel-item.focused {
+  background: var(--color-madrid);
+  color: var(--color-sofala);
+}
+
+.panel-section {
+  margin-top: 14px !important;
+}
+
+.panel-note {
+  margin: 10px 8px 2px;
+  color: var(--color-axum);
+  font-size: 13px;
+  line-height: 16px;
+}
+
+.toast {
+  position: absolute;
+  left: 50%;
+  top: 80px;
+  transform: translateX(-50%);
+  background: rgba(16, 15, 20, 0.9);
+  color: white;
+  padding: 8px 14px;
+  border-radius: 8px;
+  z-index: 6;
+  font-size: 13px;
+}
+

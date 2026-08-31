@@ -1,0 +1,17 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+.vite
+tsconfig.tsbuildinfo
+.vercel
+
+# Файлы больше 100 МБ GitHub и Vercel не принимают
+public/video/dar.mov
+public/video/selskij-detektiv.mov
