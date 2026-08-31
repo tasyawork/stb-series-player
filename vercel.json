@@ -1,8 +1,0 @@
-{
-  "rewrites": [
-    {
-      "source": "/api/ivi/:path*",
-      "destination": "https://api.ivi.ru/mobileapi/:path*"
-    }
-  ]
-}
