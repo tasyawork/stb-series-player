@@ -589,9 +589,12 @@ input {
   background: color-mix(in srgb, var(--color-sofia) 32%, transparent);
 }
 
-/* Nebula seekbar damhrogu: вне фокуса белый прогресс, в фокусе — madrid */
+/* Nebula seekbar damhrogu: вне фокуса белый прогресс, в фокусе — madrid.
+   Позиция приходит из --seek-ratio на .seekbar: так тик времени меняет
+   одно свойство на корне полосы, а не инлайновые стили двух узлов */
 .track-fill {
   right: auto;
+  width: calc(var(--seek-ratio, 0) * 100%);
   background: var(--color-sofala);
   transition: background var(--duration-focus) ease;
 }
@@ -599,6 +602,7 @@ input {
 .thumb {
   position: absolute;
   top: 2px;
+  left: calc(var(--seek-ratio, 0) * 100%);
   width: 16px;
   height: 16px;
   margin-left: -8px;

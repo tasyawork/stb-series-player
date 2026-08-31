@@ -1,4 +1,7 @@
+import { memo } from "react";
 import type { IviEpisode } from "../ivi/types";
+import type { PlayheadStore } from "./playhead";
+import { usePlayhead } from "./playhead";
 import { formatMinutes } from "./time";
 
 const CARD_W = 178;
@@ -10,16 +13,23 @@ const WINDOW = 824;
 type EpisodeRailProps = {
   episodes: IviEpisode[];
   currentId: number;
-  progress: number;
+  playhead: PlayheadStore;
+  duration: number;
   focusedIndex: number | null;
   /** Позиция ряда: сохраняется, когда фокус уходит из серий на кнопки под ними */
   anchorIndex: number;
 };
 
-export function EpisodeRail({
+/*
+  Ряд может быть на сотню карточек с картинками, поэтому он не должен зависеть
+  от хода времени: полоску прогресса тикает отдельный крошечный подписчик,
+  а сам ряд перерисовывается только на смену сезона, серии или фокуса.
+*/
+export const EpisodeRail = memo(function EpisodeRail({
   episodes,
   currentId,
-  progress,
+  playhead,
+  duration,
   focusedIndex,
   anchorIndex,
 }: EpisodeRailProps) {
@@ -53,11 +63,7 @@ export function EpisodeRail({
                     {availabilityLabel(episode)}
                   </div>
                 ) : null}
-                {current ? (
-                  <div className="poster-progress">
-                    <span style={{ width: `${Math.max(4, progress * 100)}%` }} />
-                  </div>
-                ) : null}
+                {current ? <PosterProgress playhead={playhead} duration={duration} /> : null}
               </div>
               <p>{episode.episode} серия</p>
               <small className={episode.availability !== "available" || episode.isLocked ? "empty" : ""}>
@@ -69,6 +75,17 @@ export function EpisodeRail({
           );
         })}
       </div>
+    </div>
+  );
+});
+
+function PosterProgress({ playhead, duration }: { playhead: PlayheadStore; duration: number }) {
+  const current = usePlayhead(playhead);
+  const progress = duration > 0 ? Math.min(1, current / duration) : 0;
+
+  return (
+    <div className="poster-progress">
+      <span style={{ width: `${Math.max(4, progress * 100)}%` }} />
     </div>
   );
 }

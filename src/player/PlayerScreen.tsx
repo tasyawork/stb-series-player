@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { IviEpisode, IviSeries } from "../ivi/types";
 import { EpisodeRail } from "./EpisodeRail";
 import { NotifyButton } from "./NotifyButton";
+import { createPlayhead } from "./playhead";
 import { SeasonTabs } from "./SeasonTabs";
 import { Seekbar } from "./Seekbar";
 import { SubscriptionButton } from "./SubscriptionButton";
@@ -47,7 +48,7 @@ type PlayerScreenProps = {
   onExit: () => void;
 };
 
-export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
+function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
   const [activeSeason, setActiveSeason] = useState(series.loadedSeason);
   const firstEpisode =
     series.episodes.find(
@@ -55,7 +56,6 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
     ) ?? series.episodes[0];
   const [episodeId, setEpisodeId] = useState(firstEpisode?.id ?? 0);
   const [playing, setPlaying] = useState(true);
-  const [current, setCurrent] = useState(0);
   const [focus, setFocus] = useState<Focus>("pause");
   const [railIndex, setRailIndex] = useState(0);
   const [panel, setPanel] = useState<"quality" | "audio" | null>(null);
@@ -73,11 +73,33 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
   const [buffering, setBuffering] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const bufferTimerRef = useRef<number | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
   const browseOriginRef = useRef<{ season: number; index: number } | null>(null);
   // Последняя замеченная позиция и факт того, что кадры уже реально ехали:
   // по ним отличаем идущее воспроизведение от замершего первого кадра
   const playbackTimeRef = useRef<number | null>(null);
   const playbackStartedRef = useRef(false);
+  // Копии стадии и буферизации: события видео идут пачками несколько раз в
+  // секунду, и по рефам видно, что состояние менять не нужно, без ререндера
+  const videoStageRef = useRef(videoStage);
+  const bufferingRef = useRef(false);
+
+  // Позиция воспроизведения обновляется вне состояния: см. playhead.ts
+  const playheadRef = useRef<ReturnType<typeof createPlayhead> | null>(null);
+  playheadRef.current ??= createPlayhead();
+  const playhead = playheadRef.current;
+
+  const applyVideoStage = useCallback((next: "loading" | "ready" | "unsupported") => {
+    if (videoStageRef.current === next) return;
+    videoStageRef.current = next;
+    setVideoStage(next);
+  }, []);
+
+  const applyBuffering = useCallback((next: boolean) => {
+    if (bufferingRef.current === next) return;
+    bufferingRef.current = next;
+    setBuffering(next);
+  }, []);
 
   const episodesBySeason = useMemo(
     () =>
@@ -98,6 +120,7 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
     [episodeId, playlist],
   );
   const src = episode?.videoUrl;
+  const duration = episode?.durationSec ?? 0;
   const focusRow = ROWS.findIndex((row) => (row as readonly string[]).includes(focus));
   const browsing = focusRow >= BROWSE_ROW;
   const showSubscriptionOffer = series.subscriptionRequired && !series.subscriptionActive;
@@ -144,9 +167,9 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
 
   const markVideoReady = useCallback(() => {
     clearBufferTimer();
-    setBuffering(false);
-    setVideoStage((stage) => (stage === "unsupported" ? stage : "ready"));
-  }, [clearBufferTimer]);
+    applyBuffering(false);
+    if (videoStageRef.current !== "unsupported") applyVideoStage("ready");
+  }, [applyBuffering, applyVideoStage, clearBufferTimer]);
 
   // Готовность — это не декодированный первый кадр, а поехавшие кадры:
   // пока currentTime стоит на месте, лоадер остаётся
@@ -158,6 +181,11 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
     playbackTimeRef.current = position;
     if (video.paused || previous === null || position <= previous) return;
     playbackStartedRef.current = true;
+    // timeupdate приходит четыре раза в секунду: пока лоадеру нечего менять,
+    // до состояния не доходим вообще
+    const settled =
+      videoStageRef.current === "ready" && !bufferingRef.current && bufferTimerRef.current === null;
+    if (settled) return;
     markVideoReady();
   }, [markVideoReady]);
 
@@ -181,28 +209,34 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
       if (video.paused && playbackStartedRef.current) return;
       const advanced = positionAtStart !== null && video.currentTime > positionAtStart;
       if (advanced && video.readyState >= HAVE_FUTURE_DATA) return;
-      setBuffering(true);
+      applyBuffering(true);
     }, BUFFER_GRACE_MS);
-  }, []);
+  }, [applyBuffering]);
 
   const markVideoUnsupported = useCallback(() => {
     clearBufferTimer();
-    setBuffering(false);
-    setVideoStage("unsupported");
-  }, [clearBufferTimer]);
+    applyBuffering(false);
+    applyVideoStage("unsupported");
+  }, [applyBuffering, applyVideoStage, clearBufferTimer]);
 
   useEffect(() => {
-    setCurrent(0);
+    playhead.set(0);
     setPlaying(true);
-    setVideoStage("loading");
-    setBuffering(false);
+    applyVideoStage("loading");
+    applyBuffering(false);
     clearBufferTimer();
     playbackTimeRef.current = null;
     playbackStartedRef.current = false;
     if (videoRef.current) videoRef.current.currentTime = 0;
-  }, [clearBufferTimer, episodeId]);
+  }, [applyBuffering, applyVideoStage, clearBufferTimer, episodeId, playhead]);
 
-  useEffect(() => clearBufferTimer, [clearBufferTimer]);
+  useEffect(
+    () => () => {
+      clearBufferTimer();
+      if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
+    },
+    [clearBufferTimer],
+  );
 
   // Кадры так и не поехали: дальше крутить спиннер бессмысленно, остаёмся на постере
   useEffect(() => {
@@ -245,20 +279,21 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
     return () => window.clearInterval(id);
   }, [playing, trackPlayback, videoStage]);
 
+  // Ход времени пишем в playhead, а не в состояние: иначе каждый тик
+  // перерисовывал бы весь экран вместе с рельсой серий
   useEffect(() => {
-    if (!playing || !episode) return;
+    if (!playing || !duration) return;
     const id = window.setInterval(() => {
-      setCurrent((value) => {
-        const next = value + 0.25;
-        if (next >= episode.durationSec) {
-          setPlaying(false);
-          return episode.durationSec;
-        }
-        return next;
-      });
+      const next = playhead.get() + 0.25;
+      if (next >= duration) {
+        playhead.set(duration);
+        setPlaying(false);
+        return;
+      }
+      playhead.set(next);
     }, 250);
     return () => window.clearInterval(id);
-  }, [playing, episode]);
+  }, [duration, playhead, playing]);
 
   useEffect(() => {
     if (browsing) {
@@ -297,7 +332,11 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
 
   const showToast = useCallback((text: string) => {
     setToast(text);
-    window.setTimeout(() => setToast(null), 2200);
+    if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => {
+      toastTimerRef.current = null;
+      setToast(null);
+    }, 2200);
   }, []);
 
   const activate = useCallback(
@@ -308,7 +347,7 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
       if (id === "prev") {
         if (hasPrev) goRelative(-1);
         else {
-          setCurrent(0);
+          playhead.set(0);
           if (videoRef.current) videoRef.current.currentTime = 0;
         }
       }
@@ -347,6 +386,7 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
       goRelative,
       hasPrev,
       onExit,
+      playhead,
       quality,
       qualityOptions,
       railIndex,
@@ -446,9 +486,7 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
         event.preventDefault();
         const step = event.key === "ArrowRight" ? 1 : -1;
         if (focus === "seek") {
-          setCurrent((value) =>
-            Math.min(episode?.durationSec ?? 0, Math.max(0, value + step * 10)),
-          );
+          playhead.update((value) => Math.min(duration, Math.max(0, value + step * 10)));
           return;
         }
         if (focus === "episodes") {
@@ -502,7 +540,7 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
     applyPanelOption,
     browsing,
     controlsVisible,
-    episode?.durationSec,
+    duration,
     episode?.id,
     episode?.season,
     episodesBySeason,
@@ -512,6 +550,7 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
     panel,
     panelIndex,
     panelOptions,
+    playhead,
     seasonEpisodes.length,
     selectSeason,
     series.seasons,
@@ -521,7 +560,6 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
 
   if (!episode) return null;
 
-  const progress = episode.durationSec ? current / episode.durationSec : 0;
   const posterUrl = episode.thumb || series.backdrop;
   const showVideo = Boolean(src) && videoStage !== "unsupported";
   const showLoader = showVideo && (videoStage === "loading" || buffering);
@@ -611,7 +649,7 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
             <i className="badge blue" />
           </div>
           <Seekbar
-            current={current}
+            playhead={playhead}
             duration={episode.durationSec}
             markers={episode.markers}
             focused={focus === "seek"}
@@ -627,7 +665,8 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
           <EpisodeRail
             episodes={seasonEpisodes}
             currentId={episode.id}
-            progress={progress}
+            playhead={playhead}
+            duration={episode.durationSec}
             focusedIndex={focus === "episodes" ? railIndex : null}
             anchorIndex={railIndex}
           />
@@ -686,6 +725,10 @@ export function PlayerScreen({ series, onExit }: PlayerScreenProps) {
     </>
   );
 }
+
+// Панель выбора сериала над плеером живёт в App и перерисовывается на наведение
+// и на каждый символ в поле ссылки: плеер за собой тянуть не должен
+export const PlayerScreen = memo(PlayerScreenView);
 
 function formatReleaseDate(value: string): string {
   const date = new Date(`${value}T12:00:00`);

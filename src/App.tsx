@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchIviSeries } from "./ivi/serverFetch";
 import type { IviSeries } from "./ivi/types";
 import { PlayerScreen } from "./player/PlayerScreen";
@@ -52,6 +52,9 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Ссылка на плеер должна быть стабильной, иначе memo на нём ничего не даёт
+  const returnFocusToInput = useCallback(() => inputRef.current?.focus(), []);
+
   return (
     <div className="app-shell">
       <div
@@ -60,7 +63,8 @@ export function App() {
           if (!holdCollapsed.current) setHovered(true);
         }}
         onMouseMove={() => {
-          if (!holdCollapsed.current) setHovered(true);
+          // mousemove идёт десятками событий в секунду: раскрываем панель один раз
+          if (!hovered && !holdCollapsed.current) setHovered(true);
         }}
         onMouseLeave={() => {
           holdCollapsed.current = false;
@@ -117,11 +121,7 @@ export function App() {
 
       <div className="player-stage">
         {series ? (
-          <PlayerScreen
-            key={loaded}
-            series={series}
-            onExit={() => inputRef.current?.focus()}
-          />
+          <PlayerScreen key={loaded} series={series} onExit={returnFocusToInput} />
         ) : (
           <div className="player-placeholder">
             {loading ? "Загружаем мету из mobileapi Иви…" : "Вставьте ссылку на сериал ivi.ru"}

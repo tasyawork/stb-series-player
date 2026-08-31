@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { memo, useLayoutEffect, useRef, useState } from "react";
 
 // Соседний таб остаётся подсмотренным у границы, как карточки в ряду серий
 const PEEK = 48;
@@ -9,7 +9,11 @@ type SeasonTabsProps = {
   focusedSeason: number | null;
 };
 
-export function SeasonTabs({ seasons, activeSeason, focusedSeason }: SeasonTabsProps) {
+export const SeasonTabs = memo(function SeasonTabs({
+  seasons,
+  activeSeason,
+  focusedSeason,
+}: SeasonTabsProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const trackRef = useRef<HTMLDivElement | null>(null);
   const [offset, setOffset] = useState(0);
@@ -64,4 +68,4 @@ export function SeasonTabs({ seasons, activeSeason, focusedSeason }: SeasonTabsP
       </div>
     </div>
   );
-}
+});
