@@ -4,7 +4,8 @@ import type { PlayheadStore } from "./playhead";
 import { usePlayhead } from "./playhead";
 import { formatMinutes } from "./time";
 
-const CARD_W = 178;
+/** Episode из Figma 1299:10371: постер 152×86, шаг ряда держим синхронно с --poster-w */
+const CARD_W = 152;
 const GAP = 16;
 const CARD_STEP = CARD_W + GAP;
 /** Полоса от 68px до 68px от правого края плеера (960 − 68 × 2) */

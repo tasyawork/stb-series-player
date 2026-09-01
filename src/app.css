@@ -693,13 +693,13 @@ input {
 
 .rail {
   display: flex;
-  gap: 16px;
-  height: 152px;
+  gap: var(--poster-gap);
+  height: var(--card-h);
   transition: transform var(--duration-focus) ease;
 }
 
 .rail-loading {
-  height: 152px;
+  height: var(--card-h);
   display: flex;
   align-items: center;
   color: var(--color-axum);
@@ -825,7 +825,7 @@ input {
 }
 
 .episode-card {
-  width: 178px;
+  width: var(--poster-w);
   flex: none;
   border: 0;
   background: transparent;
@@ -840,9 +840,9 @@ input {
 }
 
 .poster {
-  width: 178px;
-  height: 100px;
-  border-radius: 16px;
+  width: var(--poster-w);
+  height: var(--poster-h);
+  border-radius: var(--poster-radius);
   overflow: hidden;
   position: relative;
   background: #222;
@@ -949,8 +949,8 @@ input {
 }
 
 .episode-card.focused .poster {
-  outline: 2px solid var(--color-sofala);
-  outline-offset: 4px;
+  outline: var(--poster-focus-ring) solid var(--color-sofala);
+  outline-offset: var(--poster-focus-offset);
 }
 
 .panel {

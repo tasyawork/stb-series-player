@@ -76,9 +76,16 @@
   --font-ivi: "iviSansBase", "IVI Sans Base", "ivi Sans", system-ui, sans-serif;
   --player-w: 960px;
   --player-h: 540px;
-  --poster-w: 178px;
-  --poster-h: 100px;
+  --poster-w: 152px;
+  --poster-h: 86px;
   --poster-radius: 16px;
+  --poster-gap: 16px;
+  --poster-focus-ring: 2px;
+  --poster-focus-offset: 4px;
+  /* Постер + 12 до подписи + строка номера + 4 + строка длительности */
+  --card-h: calc(
+    var(--poster-h) + 12px + var(--typo-amphiris-line) + 4px + var(--typo-kleodora-line)
+  );
   --color-badge-w: 12px;
   --color-badge-h: 4px;
   --seekbar-track-h: 4px;
