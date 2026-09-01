@@ -50,10 +50,17 @@ type PlayerScreenProps = {
 
 function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
   const [activeSeason, setActiveSeason] = useState(series.loadedSeason);
+  // Открываем сезон на серии, которую действительно можно смотреть: под замком
+  // играть нечего, поэтому запертая серия годится только как последний вариант
   const firstEpisode =
     series.episodes.find(
+      (item) =>
+        item.season === series.loadedSeason && item.availability === "available" && !item.isLocked,
+    ) ??
+    series.episodes.find(
       (item) => item.season === series.loadedSeason && item.availability === "available",
-    ) ?? series.episodes[0];
+    ) ??
+    series.episodes[0];
   const [episodeId, setEpisodeId] = useState(firstEpisode?.id ?? 0);
   const [playing, setPlaying] = useState(true);
   const [focus, setFocus] = useState<Focus>("pause");
@@ -145,7 +152,11 @@ function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
 
   const focusRow = ROWS.findIndex((row) => (row as readonly string[]).includes(focus));
   const browsing = focusRow >= BROWSE_ROW;
-  const showSubscriptionOffer = series.subscriptionRequired && !series.subscriptionActive;
+  // Замок на карточке без предложения подписки — тупик: кнопка нужна и когда
+  // права размечены только на сезонах, и когда в выдаче есть запертые серии
+  const hasLockedEpisodes = useMemo(() => playlist.some((item) => item.isLocked), [playlist]);
+  const showSubscriptionOffer =
+    !series.subscriptionActive && (series.subscriptionRequired || hasLockedEpisodes);
 
   const qualityOptions = useMemo(
     () => ["Авто", ...series.capabilities.qualities.filter((item) => item !== "Авто")],

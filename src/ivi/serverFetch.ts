@@ -78,7 +78,15 @@ type Card = {
   has_5_1?: boolean;
   content_paid_types?: string[];
   fake?: boolean;
-  seasons?: { content_paid_types?: string[] }[];
+  seasons?: RawSeason[];
+};
+type RawSeason = {
+  number?: number;
+  content_paid_types?: string[];
+  allow_download_paid_types?: string[];
+  subscription_ids?: number[];
+  season_release_date?: number | null;
+  ivi_release_info?: { date_interval_min?: string | null };
 };
 type RawEpisode = {
   id: number;
@@ -172,10 +180,11 @@ async function loadIviSeries(
     hru: parsed.slug,
     fields: CARD_FIELDS,
   });
-  const rawEpisodes = await fetchAllEpisodes(card.id, card.episode_count);
-  if (rawEpisodes.length === 0) {
+  const allRawEpisodes = await fetchAllEpisodes(card.id, card.episode_count);
+  if (allRawEpisodes.length === 0) {
     throw new Error(`У сериала «${card.title}» не найдены серии`);
   }
+  const rawEpisodes = withoutPlaceholderSeasons(allRawEpisodes, card.seasons ?? []);
 
   const horizontal =
     imageByType(card.posters, "poster-horizontal") ||
@@ -194,22 +203,46 @@ async function loadIviSeries(
   );
 
   const slug = card.hru || parsed.slug;
+  const demoVideoUrl = usePresetVideo ? DEMO_VIDEOS[slug] : undefined;
+  /*
+    Прототип показывает сериал глазами зрителя минимального тарифа «Иви с
+    рекламой». Доступ к подписочному контенту здесь эмулирует локальный файл:
+    у пресетов он есть, и они играют как у подписчика, а произвольная ссылка
+    показывает то же, что и Иви без подписки, — открытую первую серию и замки.
+  */
+  const subscriptionActive = Boolean(demoVideoUrl);
+  const paidSeasons = new Set(
+    (card.seasons ?? [])
+      .filter((season) => typeof season.number === "number" && seasonNeedsSubscription(season))
+      .map((season) => season.number as number),
+  );
+  const announcedSeasons = new Set(
+    (card.seasons ?? [])
+      .filter((season) => typeof season.number === "number" && seasonAnnounced(season))
+      .map((season) => season.number as number),
+  );
+  const subscriptionRequired = hasSvod(card.content_paid_types) || paidSeasons.size > 0;
+  // Первая вышедшая серия у Иви открыта и без подписки, остальные платные — под замком
+  const freeEpisodeId = [...rawEpisodes]
+    .filter(isReleased)
+    .sort((a, b) => (a.season ?? 1) - (b.season ?? 1) || (a.episode ?? 0) - (b.episode ?? 0))[0]
+    ?.id;
+
   const episodes = rawEpisodes
     .map((raw, index) =>
-      mapEpisode(
-        raw,
-        index,
+      mapEpisode(raw, index, {
         slug,
-        horizontal,
+        fallbackImage: horizontal,
         upcomingPlaceholder,
         fallbackDuration,
-        usePresetVideo ? DEMO_VIDEOS[slug] : undefined,
-      ),
+        demoVideoUrl,
+        paidSeasons,
+        announcedSeasons,
+        subscriptionActive,
+        freeEpisodeId,
+      }),
     )
     .sort((a, b) => a.season - b.season || a.episode - b.episode);
-  const subscriptionRequired =
-    hasSvod(card.content_paid_types) ||
-    (card.seasons ?? []).some((season) => hasSvod(season.content_paid_types));
   const seasons = [...new Set(episodes.map((episode) => episode.season))]
     .sort((a, b) => a - b)
     .map((number) => ({
@@ -239,13 +272,65 @@ async function loadIviSeries(
       Boolean(card.has_upcoming_episodes) ||
       episodes.some((episode) => episode.availability === "upcoming"),
     subscriptionRequired,
-    // Публичный прототип показывает состояние минимального тарифа «Иви с рекламой».
-    subscriptionActive: true,
+    subscriptionActive,
   };
 }
 
 function hasSvod(types?: string[]): boolean {
   return types?.includes("SVOD") ?? false;
+}
+
+function isReleased(raw: RawEpisode): boolean {
+  return (raw.localizations ?? []).some((item) => Boolean(item.duration));
+}
+
+/*
+  content_paid_types бывает пустым и там, где Иви показывает «Смотреть по
+  подписке»: у professor-t он пуст и на карточке, и на всех сезонах. Признаки,
+  которые приходят всегда, — список тарифов сезона и права на скачивание.
+*/
+function seasonNeedsSubscription(season: RawSeason): boolean {
+  return (
+    hasSvod(season.content_paid_types) ||
+    hasSvod(season.allow_download_paid_types) ||
+    (season.subscription_ids?.length ?? 0) > 0
+  );
+}
+
+// Сезон объявлен, если у него есть дата выхода или тарифы, по которым его продают
+function seasonAnnounced(season: RawSeason): boolean {
+  return (
+    Boolean(season.season_release_date) ||
+    Boolean(season.ivi_release_info?.date_interval_min) ||
+    (season.subscription_ids?.length ?? 0) > 0
+  );
+}
+
+/*
+  Серии запрашиваются с fake=1, иначе не видно невышедших. Вместе с ними Иви
+  отдаёт и сезоны-заготовки: у professor-t это четвёртый сезон без длительностей,
+  без даты и без тарифов, которого на сайте нет вовсе. Такой сезон в ряду сезонов
+  выглядел бы шестью карточками «Недоступно», поэтому его отбрасываем.
+*/
+function withoutPlaceholderSeasons(
+  episodes: RawEpisode[],
+  seasons: RawSeason[],
+): RawEpisode[] {
+  const released = new Set(episodes.filter(isReleased).map((raw) => raw.season ?? 1));
+  const placeholders = new Set(
+    seasons
+      .filter(
+        (season) =>
+          typeof season.number === "number" &&
+          !released.has(season.number) &&
+          !seasonAnnounced(season),
+      )
+      .map((season) => season.number as number),
+  );
+  if (placeholders.size === 0) return episodes;
+  const kept = episodes.filter((raw) => !placeholders.has(raw.season ?? 1));
+  // Сериал целиком из заготовок — это анонс: показываем как есть, иначе экран пуст
+  return kept.length > 0 ? kept : episodes;
 }
 
 async function fetchAllEpisodes(id: number, expectedCount?: number): Promise<RawEpisode[]> {
@@ -311,15 +396,31 @@ async function apiGet<T>(path: string, params: Record<string, string>): Promise<
   throw new Error(`Не удалось получить данные Иви: ${lastError?.message ?? "неизвестная ошибка"}`);
 }
 
-function mapEpisode(
-  raw: RawEpisode,
-  index: number,
-  slug: string,
-  fallbackImage: string,
-  upcomingPlaceholder: string,
-  fallbackDuration: number,
-  demoVideoUrl?: string,
-): IviEpisode {
+type MapEpisodeContext = {
+  slug: string;
+  fallbackImage: string;
+  upcomingPlaceholder: string;
+  fallbackDuration: number;
+  demoVideoUrl?: string;
+  paidSeasons: Set<number>;
+  announcedSeasons: Set<number>;
+  subscriptionActive: boolean;
+  freeEpisodeId?: number;
+};
+
+function mapEpisode(raw: RawEpisode, index: number, context: MapEpisodeContext): IviEpisode {
+  const {
+    slug,
+    fallbackImage,
+    upcomingPlaceholder,
+    fallbackDuration,
+    demoVideoUrl,
+    paidSeasons,
+    announcedSeasons,
+    subscriptionActive,
+    freeEpisodeId,
+  } = context;
+  const season = raw.season ?? 1;
   const localization = raw.localizations?.find((item) => item.duration) ?? raw.localizations?.[0];
   const durationSec = localization?.duration || fallbackDuration;
   const releaseDate = raw.ivi_release_info?.date_interval_min || undefined;
@@ -327,11 +428,19 @@ function mapEpisode(
     Флаг fake у Иви значит «не проиграется в анонимной сессии», а не «нет данных»:
     у подписочных серий он стоит вместе с реальной длительностью и превью.
     Поэтому доступность определяем по наличию данных, а невышедшей считаем серию,
-    у которой их нет и дата выхода ещё впереди.
+    у которой их нет, но сезон объявлен или дата выхода ещё впереди. «Недоступно»
+    остаётся редким случаем, когда о серии не известно вообще ничего.
   */
   const released = Boolean(localization?.duration);
-  const upcoming = !released && Boolean(releaseDate) && Date.parse(`${releaseDate}T00:00:00`) > Date.now();
+  const dated = Boolean(releaseDate) && Date.parse(`${releaseDate}T00:00:00`) > Date.now();
+  const upcoming = !released && (dated || announcedSeasons.has(season));
   const availability = released ? "available" : upcoming ? "upcoming" : "unavailable";
+  // Серия вышла, но лежит за подпиской: на карточке замок, а не текст
+  const isLocked =
+    availability === "available" &&
+    paidSeasons.has(season) &&
+    !subscriptionActive &&
+    raw.id !== freeEpisodeId;
   const thumb =
     availability === "available"
       ? imageByFormat(raw.thumbs, "Thumb-") ||
@@ -348,17 +457,17 @@ function mapEpisode(
   return {
     id: raw.id,
     title: raw.title || `Серия ${raw.episode ?? index + 1}`,
-    season: raw.season ?? 1,
+    season,
     episode: raw.episode ?? index + 1,
     durationSec,
     poster: imageByType(raw.posters, "poster-horizontal") || thumb,
     thumb,
     iviUrl: `https://www.ivi.ru/watch/${slug}`,
-    videoUrl: availability === "available" ? demoVideoUrl : undefined,
+    videoUrl: availability === "available" && !isLocked ? demoVideoUrl : undefined,
     markers: markers.length ? markers : [0.28, 0.52, 0.74],
     availability,
     releaseDate,
-    isLocked: false,
+    isLocked,
   };
 }
 
