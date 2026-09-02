@@ -25,6 +25,7 @@ input {
 }
 
 .app-shell {
+  position: relative;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -32,6 +33,58 @@ input {
   /* Нижний запас под увеличенный плеер: он растёт вниз от верхнего края */
   padding: 20px 16px 120px;
   background: #000;
+}
+
+/*
+  Область плеера: бокс шириной с макет (960), плеер внутри масштабируется ×1.2
+  от верхнего края и вылезает за бокс симметрично по горизонтали (по 96px)
+  и вниз. Служит якорем для переключателя вариантов слева.
+*/
+.player-region {
+  position: relative;
+  width: var(--player-w);
+  max-width: 100%;
+}
+
+/* Переключатель вкладок прототипа «Без рекома» / «С рекомом» — всегда слева от
+   ТВ, вертикальной стопкой, по центру картинки (бокс 540 × scale 1.2 от верха →
+   центр на 324px). Левый край плеера — на (50vw − 576px); правый край кнопок
+   ставим на 24px левее и растим влево. На узких окнах прижимаем к краю (минимум
+   12px), чтобы кнопки не уехали за край, а не прятались */
+.mode-switch {
+  position: absolute;
+  top: 324px;
+  transform: translateY(-50%);
+  left: max(-252px, calc(492px - 50vw));
+  width: 132px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 10;
+}
+
+.mode-btn {
+  min-width: 132px;
+  height: 40px;
+  border: 0;
+  border-radius: 12px;
+  padding: 0 16px;
+  background: #171717;
+  color: var(--color-sofia);
+  font-size: 15px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--duration-focus) ease, color var(--duration-focus) ease;
+}
+
+.mode-btn:hover {
+  background: var(--color-berbera);
+}
+
+.mode-btn.active {
+  background: var(--color-segment-selected);
+  color: var(--color-sofala);
 }
 
 .picker {

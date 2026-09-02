@@ -12,9 +12,13 @@ const EXAMPLES = [
   },
 ];
 
+type Mode = "plain" | "recom";
+
 export function App() {
   const [query, setQuery] = useState(EXAMPLES[0].q);
   const [loaded, setLoaded] = useState(EXAMPLES[0].q);
+  // Вкладка прототипа: «Без рекома» / «С рекомом». Пока обе показывают один плеер
+  const [mode, setMode] = useState<Mode>("plain");
   // Подсветка чипа не ждёт сеть: выбор виден в том же кадре, что клик
   const [selected, setSelected] = useState(EXAMPLES[0].q);
   const [loading, setLoading] = useState(true);
@@ -140,9 +144,34 @@ export function App() {
 
       {error ? <div className="search-error">{error}</div> : null}
 
-      <div className="player-stage">
+      <div className="player-region">
+        <div className="mode-switch" role="group" aria-label="Вариант прототипа">
+          <button
+            type="button"
+            className={`mode-btn${mode === "plain" ? " active" : ""}`}
+            aria-pressed={mode === "plain"}
+            onClick={() => setMode("plain")}
+          >
+            Без рекома
+          </button>
+          <button
+            type="button"
+            className={`mode-btn${mode === "recom" ? " active" : ""}`}
+            aria-pressed={mode === "recom"}
+            onClick={() => setMode("recom")}
+          >
+            С рекомом
+          </button>
+        </div>
+
+        <div className="player-stage">
         {series ? (
-          <PlayerScreen key={loaded} series={series} onExit={returnFocusToInput} />
+          <PlayerScreen
+            key={`${loaded}::${mode}`}
+            variant={mode}
+            series={series}
+            onExit={returnFocusToInput}
+          />
         ) : (
           /*
             До прихода меты кадр плеера уже на месте: заставки с иконкой запуска
@@ -157,6 +186,7 @@ export function App() {
             ) : null}
           </div>
         )}
+        </div>
       </div>
     </div>
   );

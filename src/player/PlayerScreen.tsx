@@ -43,12 +43,17 @@ const PLAYBACK_POLL_MS = 200;
 
 type PanelOption = { kind: "quality" | "audio" | "subtitle"; value: string };
 
+// Вариант прототипа: "plain" — базовый, "recom" — с рекомендациями.
+// Пока оба ведут себя одинаково; крючок для будущих правок второго варианта.
+type PlayerVariant = "plain" | "recom";
+
 type PlayerScreenProps = {
   series: IviSeries;
   onExit: () => void;
+  variant?: PlayerVariant;
 };
 
-function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
+function PlayerScreenView({ series, onExit, variant = "plain" }: PlayerScreenProps) {
   const [activeSeason, setActiveSeason] = useState(series.loadedSeason);
   // Открываем сезон на серии, которую действительно можно смотреть: под замком
   // играть нечего, поэтому запертая серия годится только как последний вариант
@@ -613,7 +618,10 @@ function PlayerScreenView({ series, onExit }: PlayerScreenProps) {
   return (
     <>
       {/* Управление только с пульта: мышь внутри плеера отключена в стилях */}
-      <div className={`player-wrap${browsing ? " browsing" : ""}${controlsVisible ? "" : " idle"}`}>
+      <div
+        className={`player-wrap${browsing ? " browsing" : ""}${controlsVisible ? "" : " idle"}`}
+        data-variant={variant}
+      >
         {/* Есть локальный файл — видео монтируется сразу и без poster: любой статичный
             кадр перед стартом выглядит как заглушка, а ожидание и так показывает спиннер.
             Источника нет — <video> не монтируем вовсе, кадр держит скрин серии */}
