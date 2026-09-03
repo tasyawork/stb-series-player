@@ -820,9 +820,13 @@ function mapEpisode(raw: RawEpisode, index: number, context: MapEpisodeContext):
   const dated = Boolean(releaseDate) && Date.parse(`${releaseDate}T00:00:00`) > Date.now();
   const upcoming = !released && (dated || announcedSeasons.has(season));
   const availability = released ? "available" : upcoming ? "upcoming" : "unavailable";
-  // Серия вышла, но лежит за подпиской: на карточке замок, а не текст
+  /*
+    Подписочная серия: замок и платная обводка. Метим не только вышедшие, но и
+    ещё не вышедшие серии платного сезона — они тоже за подпиской, а не «включить
+    напоминание». Напоминание остаётся только у бесплатных невышедших серий.
+  */
   const isLocked =
-    availability === "available" &&
+    (availability === "available" || availability === "upcoming") &&
     paidSeasons.has(season) &&
     !subscriptionActive &&
     raw.id !== freeEpisodeId;

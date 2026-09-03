@@ -101,6 +101,10 @@ function PlayerScreenView({
   const bufferTimerRef = useRef<number | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const browseOriginRef = useRef<{ season: number; index: number } | null>(null);
+  // Разгон листинга серий при удержании стрелки: копим повторы и растим шаг
+  const railRepeatRef = useRef<{ dir: number; count: number }>({ dir: 0, count: 0 });
+  // Напоминания о выходе невышедших (бесплатных) серий — по id серии
+  const [episodeReminders, setEpisodeReminders] = useState<Set<number>>(() => new Set());
   // Последняя замеченная позиция и факт того, что кадры уже реально ехали:
   // по ним отличаем идущее воспроизведение от замершего первого кадра
   const playbackTimeRef = useRef<number | null>(null);
@@ -186,7 +190,11 @@ function PlayerScreenView({
   */
   const isFilm = content === "film";
   const isRecom = variant === "recom" || isFilm;
-  const railCardWidth = isRecom ? 224 : 152;
+  // Один сезон — таб становится некликабельным заголовком, фокус на него не идёт
+  const singleSeason = series.seasons.length <= 1;
+  // Ряд серий всегда 152 (как в «Без рекома»), галереи рекомендаций — 224
+  const EPISODE_CARD_W = 152;
+  const RECOM_CARD_W = 224;
   /*
     Две галереи фильма: берём готовые именованные подборки (series.galleries),
     а если их нет — откатываемся на общий ряд рекомендаций (вторую полку
@@ -471,11 +479,29 @@ function PlayerScreenView({
         } else if (chosen?.availability === "available") {
           setEpisodeId(chosen.id);
         } else if (chosen?.availability === "upcoming") {
-          showToast(
-            chosen.releaseDate
-              ? `Серия выйдет ${formatReleaseDate(chosen.releaseDate)}`
-              : "Серия ещё не вышла",
-          );
+          const id = chosen.id;
+          // Напоминание — фича «С рекомом»; в «Без рекома» просто сообщаем дату
+          if (!isRecom) {
+            showToast(
+              chosen.releaseDate
+                ? `Серия выйдет ${formatReleaseDate(chosen.releaseDate)}`
+                : "Серия ещё не вышла",
+            );
+          } else {
+            setEpisodeReminders((selected) => {
+              const next = new Set(selected);
+              if (next.has(id)) next.delete(id);
+              else next.add(id);
+              return next;
+            });
+            showToast(
+              episodeReminders.has(id)
+                ? "Напоминание отключено"
+                : chosen.releaseDate
+                  ? `Напомним ${formatReleaseDate(chosen.releaseDate)}`
+                  : "Напомним о выходе",
+            );
+          }
         } else if (chosen) {
           showToast("Серия недоступна в текущем регионе");
         }
@@ -483,9 +509,11 @@ function PlayerScreenView({
     },
     [
       audio,
+      episodeReminders,
       goRelative,
       hasPrev,
       isFilm,
+      isRecom,
       onExit,
       playhead,
       quality,
@@ -593,9 +621,33 @@ function PlayerScreenView({
           return;
         }
         if (focus === "episodes") {
-          // В фильме верхняя галерея — карточки подборки, а не серии
-          const last = (isFilm ? filmTopItems.length : seasonEpisodes.length) - 1;
-          setRailIndex((value) => Math.max(0, Math.min(last, value + step)));
+          if (isFilm) {
+            // В фильме верхняя галерея — карточки подборки, без закольцовки/разгона
+            const last = filmTopItems.length - 1;
+            setRailIndex((value) => Math.max(0, Math.min(last, value + step)));
+            return;
+          }
+          const total = seasonEpisodes.length;
+          const loop = total > 15; // закольцовка листинга у длинных сезонов
+          const accel = total >= 30; // разгон при удержании у очень длинных
+          // Геометрический разгон только при удержании (event.repeat) и в одну сторону
+          const rr = railRepeatRef.current;
+          if (!event.repeat || rr.dir !== step) {
+            rr.dir = step;
+            rr.count = 0;
+          } else {
+            rr.count += 1;
+          }
+          const magnitude = accel ? accelerationStep(rr.count) : 1;
+          setRailIndex((value) => {
+            let next = value + step * magnitude;
+            // На разгоне у краёв просто упираемся; закольцовка — только на одиночном шаге
+            if (loop && magnitude === 1) {
+              if (next < 0) return total - 1;
+              if (next > total - 1) return 0;
+            }
+            return Math.max(0, Math.min(total - 1, next));
+          });
           return;
         }
         if (focus === "recom") {
@@ -638,8 +690,8 @@ function PlayerScreenView({
         if (focus === "notify" || focus === "subscription" || focus === "recom") {
           setFocus("episodes");
         } else if (focus === "episodes") {
-          // В фильме над галереей нет табов сезонов — уходим сразу на таймлайн
-          setFocus(isFilm ? "seek" : "seasons");
+          // Нет табов сезонов (фильм или один сезон) — уходим сразу на таймлайн
+          setFocus(isFilm || singleSeason ? "seek" : "seasons");
         } else if (focus === "seasons") {
           setFocus("seek");
         } else if (focus === "seek") {
@@ -666,6 +718,7 @@ function PlayerScreenView({
     focusRow,
     isFilm,
     isRecom,
+    singleSeason,
     onExit,
     panel,
     panelIndex,
@@ -805,7 +858,7 @@ function PlayerScreenView({
                 items={filmTopItems}
                 focusedIndex={focus === "episodes" ? railIndex : null}
                 anchorIndex={railIndex}
-                cardWidth={railCardWidth}
+                cardWidth={RECOM_CARD_W}
               />
             </div>
           ) : (
@@ -822,8 +875,11 @@ function PlayerScreenView({
                 duration={episode.durationSec}
                 focusedIndex={focus === "episodes" ? railIndex : null}
                 anchorIndex={railIndex}
-                cardWidth={railCardWidth}
+                cardWidth={EPISODE_CARD_W}
                 paid={paidBadge}
+                loop={seasonEpisodes.length > 15}
+                reminders={episodeReminders}
+                recom={isRecom}
               />
             </>
           )}
@@ -836,7 +892,7 @@ function PlayerScreenView({
                 items={isFilm ? filmBottomItems : series.recommendations}
                 focusedIndex={focus === "recom" ? recomIndex : null}
                 anchorIndex={recomIndex}
-                cardWidth={railCardWidth}
+                cardWidth={RECOM_CARD_W}
               />
             </div>
           ) : (
@@ -900,6 +956,15 @@ function PlayerScreenView({
 // Панель выбора сериала над плеером живёт в App и перерисовывается на наведение
 // и на каждый символ в поле ссылки: плеер за собой тянуть не должен
 export const PlayerScreen = memo(PlayerScreenView);
+
+/*
+  Геометрический разгон листинга при удержании стрелки: несколько первых
+  повторов идут по одной серии, дальше шаг удваивается — 1,1,1,2,2,2,4,4,4,8…
+  (до 16), чтобы по сезону из десятков серий можно было пролистать быстро.
+*/
+function accelerationStep(repeatCount: number): number {
+  return Math.min(16, 2 ** Math.floor(repeatCount / 3));
+}
 
 function formatReleaseDate(value: string): string {
   const date = new Date(`${value}T12:00:00`);

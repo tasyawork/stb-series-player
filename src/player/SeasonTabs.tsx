@@ -39,6 +39,14 @@ export const SeasonTabs = memo(function SeasonTabs({
   }, [activeSeason, seasons]);
 
   if (seasons.length === 0) return null;
+  // Один сезон — не таб, а простой некликабельный заголовок
+  if (seasons.length === 1) {
+    return (
+      <div className="season-tabs">
+        <div className="season-heading">{seasons[0].number} сезон</div>
+      </div>
+    );
+  }
   return (
     <div className="season-tabs" ref={viewportRef}>
       <div

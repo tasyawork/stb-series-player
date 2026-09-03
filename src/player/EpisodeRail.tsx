@@ -1,4 +1,5 @@
-import { memo } from "react";
+import { memo, useLayoutEffect, useRef } from "react";
+import type { ReactNode } from "react";
 import type { IviEpisode } from "../ivi/types";
 import type { PlayheadStore } from "./playhead";
 import { usePlayhead } from "./playhead";
@@ -23,6 +24,21 @@ type EpisodeRailProps = {
   gap?: number;
   /** Платный тайтл (recom): у карточки в фокусе шильд «По подписке» перед длительностью */
   paid?: boolean;
+  /*
+    Закольцовка длинного сезона: ряд превращается в бесшовную карусель. По краям
+    дорисованы клоны серий с другого конца, а переход через край (с 1 на
+    последнюю и обратно) — плавный: незаметная телепортация к клону и один шаг
+    анимации, без рывка через весь сезон.
+  */
+  loop?: boolean;
+  /** id серий, на которые включено напоминание о выходе */
+  reminders?: Set<number>;
+  /*
+    Вариант «С рекомом»: невышедшая серия получает «Включить напоминание» и дату
+    выхода снизу зелёным. В «Без рекома» этих правок нет — там старый вид с датой
+    поверх постера.
+  */
+  recom?: boolean;
 };
 
 /*
@@ -40,73 +56,160 @@ export const EpisodeRail = memo(function EpisodeRail({
   cardWidth = DEFAULT_CARD_W,
   gap = DEFAULT_GAP,
   paid = false,
+  loop = false,
+  reminders,
+  recom = false,
 }: EpisodeRailProps) {
   const cardStep = cardWidth + gap;
-  const trackWidth = episodes.length * cardStep - gap;
-  // На конце списка ряд упирается правым краем постера в границу окна
-  const maxOffset = Math.max(0, trackWidth - WINDOW);
-  // Серия в фокусе встаёт на первую позицию ряда, пройденные уходят за левый край плеера
-  const offset = Math.min(Math.max(0, anchorIndex) * cardStep, maxOffset);
+  const count = episodes.length;
+  const canLoop = loop && count > 1;
+  // Сколько клонов дорисовываем по краям — чтобы окно всегда было заполнено
+  const clones = canLoop ? Math.min(count, Math.ceil(WINDOW / cardStep) + 1) : 0;
+
+  /*
+    Карусель: реальные серии сдвинуты на clones карточек вправо. Как и без
+    закольцовки, серия у левого поля, а последняя упирается правым краем в окно
+    (68px от правого края) — маленький «пин» в конце. Клоны по краям заполняют
+    окно и служат двойниками для бесшовного перехода через край.
+  */
+  const maxLoopOffset = (clones + count - 1) * cardStep + cardWidth - WINDOW;
+  const loopOffset = (index: number) =>
+    Math.min((clones + Math.max(0, Math.min(count - 1, index))) * cardStep, maxLoopOffset);
+  const plainOffset = (index: number) => {
+    const trackWidth = count * cardStep - gap;
+    const maxOffset = Math.max(0, trackWidth - WINDOW);
+    return Math.min(Math.max(0, index) * cardStep, maxOffset);
+  };
+  const baseOffset = (index: number) => (canLoop ? loopOffset(index) : plainOffset(index));
+
+  /*
+    Сдвигом ленты управляем императивно (не через React-стиль), иначе ререндер
+    перебивал бы переход через край. React только рисует карточки, а положение и
+    анимацию задаёт этот эффект по ref.
+  */
+  const railRef = useRef<HTMLDivElement | null>(null);
+  const prev = useRef({ index: anchorIndex, count, mounted: false });
+
+  useLayoutEffect(() => {
+    const el = railRef.current;
+    if (!el) return;
+    const before = prev.current;
+    prev.current = { index: anchorIndex, count, mounted: true };
+    const next = baseOffset(anchorIndex);
+    const move = (px: number) => (el.style.transform = `translateX(${-px}px)`);
+
+    const wrappedLeft = canLoop && before.index === 0 && anchorIndex === count - 1;
+    const wrappedRight = canLoop && before.index === count - 1 && anchorIndex === 0;
+
+    if (!before.mounted || before.count !== count) {
+      // Монтирование или смена сезона — просто встаём в позицию, без анимации
+      el.style.transition = "none";
+      move(next);
+    } else if (wrappedLeft || wrappedRight) {
+      /*
+        Телепорт к двойнику у противоположного края (кадр совпадает с текущим —
+        незаметно), форс-рефлоу, затем один «экран» анимации к цели: с 1 серии
+        последняя уезжает вправо на своё крайнее место, с последней — 1 серия
+        приезжает к левому полю. Иначе CSS-переход проехал бы весь сезон.
+      */
+      const teleport = wrappedLeft
+        ? (clones + count) * cardStep
+        : (clones - 1) * cardStep - (WINDOW - cardWidth);
+      el.style.transition = "none";
+      move(teleport);
+      void el.offsetWidth;
+      el.style.transition = "";
+      move(next);
+    } else {
+      el.style.transition = "";
+      move(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchorIndex, canLoop, count, cardStep, clones]);
+
+  const renderCard = (episode: IviEpisode, index: number, key: string, clone: boolean) => {
+    const current = !clone && episode.id === currentId;
+    const focused = !clone && focusedIndex === index;
+    const locked = episode.isLocked; // подписочная серия (вышедшая или ещё нет)
+    const upcoming = episode.availability === "upcoming";
+    const upcomingFree = upcoming && !locked;
+    const reminded = upcomingFree && Boolean(reminders?.has(episode.id));
+    // Шильд «По подписке» — только у подписочной серии в фокусе (вместо тайминга)
+    const showShield = !clone && paid && focused && locked;
+    // Тайминг — у вышедших серий; у подписочной закрытой — только вне фокуса
+    const showDuration =
+      episode.availability === "available" && (!locked || paid);
+
+    // Вторая строка: шильд, либо зелёная дата у невышедшей, либо тайминг
+    let secondLine: ReactNode;
+    if (showShield) {
+      secondLine = (
+        <span className="paid-shield">
+          <img className="paid-shield-icon" src="/icons/subscription-badge.png" alt="" />
+          <span className="paid-shield-text">По подписке</span>
+        </span>
+      );
+    } else if (upcoming && recom) {
+      // «С рекомом»: дата выхода снизу зелёным (в «Без рекома» она поверх постера)
+      secondLine = <small className="release-date">{availabilityLabel(episode)}</small>;
+    } else {
+      secondLine = (
+        <small className={showDuration ? "" : "empty"}>
+          {showDuration ? formatMinutes(episode.durationSec) : " "}
+        </small>
+      );
+    }
+
+    return (
+      <div
+        key={key}
+        className={`episode-card${current ? " current" : ""}${focused ? " focused" : ""} availability-${
+          episode.availability
+        }${locked ? " locked" : ""}${clone ? " clone" : ""}`}
+        aria-disabled={episode.availability !== "available" || locked}
+        aria-hidden={clone || undefined}
+      >
+        <div className="poster">
+          {episode.thumb ? <img src={episode.thumb} alt="" loading="lazy" /> : null}
+          {locked ? (
+            <div className="availability-overlay">
+              <img className="lock-icon" src="/icons/locked.svg" alt="По подписке" />
+            </div>
+          ) : upcomingFree && recom ? (
+            // «С рекомом»: невышедшая бесплатная серия — включить напоминание о выходе
+            <div className="availability-overlay notify-overlay">
+              <img className="notify-bell" src="/icons/pull.svg" alt="" />
+              <span>{reminded ? "Напоминание включено" : "Включить напоминание"}</span>
+            </div>
+          ) : episode.availability !== "available" ? (
+            // «Без рекома» (и «Недоступно»): подпись поверх постера, как раньше
+            <div className="availability-overlay">{availabilityLabel(episode)}</div>
+          ) : null}
+          {current ? <PosterProgress playhead={playhead} duration={duration} /> : null}
+        </div>
+        <p>
+          {current ? <OnAirIcon /> : null}
+          {episode.episode} серия
+        </p>
+        {secondLine}
+      </div>
+    );
+  };
 
   return (
     <div className="rail-viewport">
-      <div className="rail" style={{ transform: `translateX(${-offset}px)` }}>
-        {episodes.map((episode, index) => {
-          const current = episode.id === currentId;
-          const focused = focusedIndex === index;
-          /*
-            Шильд «По подписке» и градиентная рамка — только у серии под замком.
-            Доступную серию ничем не метим: у неё в фокусе обычная белая обводка
-            и никакого шильда, даже если сам тайтл подписочный.
-          */
-          const showShield = paid && focused && episode.isLocked;
-          // Тайминг показываем у открытых серий, а у закрытых — только в фокусе платного тайтла
-          const showDuration =
-            episode.availability === "available" && (!episode.isLocked || paid);
-          return (
-            <div
-              key={episode.id}
-              className={`episode-card${current ? " current" : ""}${
-                focusedIndex === index ? " focused" : ""
-              } availability-${episode.availability}${episode.isLocked ? " locked" : ""}`}
-              aria-disabled={episode.availability !== "available" || episode.isLocked}
-            >
-              <div className="poster">
-                {episode.thumb ? <img src={episode.thumb} alt="" loading="lazy" /> : null}
-                {episode.isLocked ? (
-                  <div className="availability-overlay">
-                    <img className="lock-icon" src="/icons/locked.svg" alt="По подписке" />
-                  </div>
-                ) : episode.availability !== "available" ? (
-                  <div className="availability-overlay">
-                    {availabilityLabel(episode)}
-                  </div>
-                ) : null}
-                {current ? <PosterProgress playhead={playhead} duration={duration} /> : null}
-              </div>
-              <p>
-                {current ? <OnAirIcon /> : null}
-                {episode.episode} серия
-              </p>
-              {showShield ? (
-                // Платный тайтл: шильд «По подписке» перед длительностью у карточки в фокусе
-                <span className="paid-shield">
-                  <img className="paid-shield-icon" src="/icons/subscription-badge.png" alt="" />
-                  <span className="paid-shield-text">По подписке</span>
-                </span>
-              ) : null}
-              <small
-                className={`${showDuration ? "" : "empty"}${
-                  paid && focused ? " episode-paid-duration" : ""
-                }`}
-              >
-                {showDuration
-                  ? formatMinutes(episode.durationSec)
-                  : "\u00a0"}
-              </small>
-            </div>
-          );
-        })}
+      <div ref={railRef} className="rail">
+        {canLoop
+          ? episodes
+              .slice(count - clones)
+              .map((episode, i) => renderCard(episode, -1, `clone-l-${episode.id}-${i}`, true))
+          : null}
+        {episodes.map((episode, index) => renderCard(episode, index, `${episode.id}`, false))}
+        {canLoop
+          ? episodes
+              .slice(0, clones)
+              .map((episode, i) => renderCard(episode, -1, `clone-r-${episode.id}-${i}`, true))
+          : null}
       </div>
     </div>
   );

@@ -733,6 +733,17 @@ input {
   transition: transform var(--duration-focus) ease;
 }
 
+/* Один сезон: заголовок вместо таба — без фона, отступов чипа и клика */
+.season-heading {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  font-size: var(--typo-eralato-size);
+  line-height: var(--typo-eralato-line);
+  font-weight: 700;
+  color: var(--color-sofala);
+}
+
 /* SegmentControlItem из Figma 1299:10342 */
 .segment-item {
   height: 40px;
@@ -948,6 +959,11 @@ input {
   opacity: var(--opacity-pake);
 }
 
+/* Выглядывающие за край клоны первой/последней серии (закольцовка) затемнены на 50% */
+.episode-card.clone .poster::after {
+  opacity: 0.5;
+}
+
 /* Episode / CoomingSoon: подпись даты — Ctrl/15|20 M поверх затемнённого кадра */
 .availability-overlay {
   position: absolute;
@@ -986,6 +1002,36 @@ input {
   width: 20px;
   height: 20px;
   opacity: 1;
+}
+
+/* Невышедшая бесплатная серия: колокольчик и «Включить напоминание» по центру */
+.availability-overlay.notify-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  text-align: center;
+  white-space: normal;
+  font-size: var(--typo-kleodora-size);
+  line-height: var(--typo-kleodora-line);
+}
+
+.notify-overlay .notify-bell {
+  width: 16px;
+  height: 16px;
+  opacity: 1;
+}
+
+/* Дата выхода невышедшей серии — снизу и зелёная (Figma 318:14892) */
+.episode-card small.release-date {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 500;
+  color: var(--color-beirut);
 }
 
 .episode-card small.empty {
@@ -1050,10 +1096,11 @@ input {
 
 /* ===== Вариант «С рекомом» ===== */
 
-/* Крупные постеры 224×126 (базовые 152×86). --card-h переопределяем явно:
-   на :root он уже посчитан с базовым --poster-h (var() подставляется в месте
-   объявления, а не использования), поэтому здесь его нужно задать заново */
-.player-wrap[data-variant="recom"] {
+/* Ряд серий в «С рекомом» — того же размера, что в «Без рекома» (базовые 152×86).
+   Крупными (224×126) остаются только карточки галерей рекомендаций: размеры
+   задаём на самой полке, её .rail, .rec-card и .poster наследуют их отсюда.
+   --card-h переопределяем явно — на :root он уже посчитан с базовым --poster-h. */
+.recom-shelf {
   --poster-w: 224px;
   --poster-h: 126px;
   --card-h: calc(
@@ -1065,17 +1112,18 @@ input {
    Ступень 1 (фокус на первой галерее): первая галерея видна целиком, вторая
    выглядывает снизу ровно на 24px постеров. Раскладка сверху вниз:
    Ступень 1: видна первая галерея целиком и заголовок второй, её постеры торчат
-   на 24px. Постеры ряда2: сезоны 40 + gap 16 + ряд1 178 + (gap 16 + margin 16) +
-   заголовок 22 + gap 18 = top+306; чтобы кадр (540) резал их на 24px → top = 210. */
+   на 24px. Ряд серий теперь мелкий (138). Постеры ряда2: сезоны 40 + gap 16 +
+   ряд1 138 + (gap 16 + margin 16) + заголовок 22 + gap 18 = top+266; чтобы кадр
+   (540) резал их на 24px → top = 250. */
 .player-wrap[data-variant="recom"] .series-layer.open {
-  top: 210px;
+  top: 250px;
   gap: 16px;
 }
 
 /* Ступень 2 (фокус ушёл во вторую галерею): весь блок поднимается — видны обе
-   галереи целиком. Низ блока (~484) + top 24 = 508, т.е. 32px до нижней границы. */
+   галереи целиком. Низ блока (40+16+138+32+218 = 444) + top 64 = 508 → 32px до края. */
 .player-wrap[data-variant="recom"] .series-layer.open.raised {
-  top: 24px;
+  top: 64px;
 }
 
 /* Пока нижняя галерея только выглядывает снизу (ступень 1), её постеры
