@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchIviSeries, peekIviSeries, prefetchIviSeries } from "./ivi/serverFetch";
+import {
+  fetchIviFilm,
+  fetchIviSeries,
+  peekIviSeries,
+  prefetchIviSeries,
+} from "./ivi/serverFetch";
 import type { IviSeries } from "./ivi/types";
 import { PlayerScreen } from "./player/PlayerScreen";
+
+// Вкладка «Фильм» показывает один конкретный фильм с его же рекомендациями
+const FILM_URL = "https://www.ivi.ru/watch/642536";
 
 const EXAMPLES = [
   { label: "Мало серий", q: "https://www.ivi.ru/watch/holod" },
@@ -10,30 +18,32 @@ const EXAMPLES = [
     label: "Много сезонов",
     q: "https://www.ivi.ru/watch/selskij-detektiv-1-yablonya-razdora",
   },
+  // Платный тайтл: без демо-видео рендерится «глазами» без подписки —
+  // первая серия открыта, остальные под замком, вся платная логика видна
+  { label: "Платный", q: "https://www.ivi.ru/watch/dva-holma" },
 ];
 
 type Mode = "plain" | "recom";
+// Правый переключатель: сериал (текущий прототип) или фильм (две галереи)
+type Content = "series" | "film";
 
 export function App() {
   const [query, setQuery] = useState(EXAMPLES[0].q);
   const [loaded, setLoaded] = useState(EXAMPLES[0].q);
   // Вкладка прототипа: «Без рекома» / «С рекомом». Пока обе показывают один плеер
   const [mode, setMode] = useState<Mode>("plain");
+  // Тип контента: «Сериал» / «Фильм». В фильме вместо серий — две галереи
+  const [content, setContent] = useState<Content>("series");
+  // Фильм для вкладки «Фильм» грузится один раз и отдельно от сериала-пресета
+  const [film, setFilm] = useState<IviSeries | null>(null);
   // Подсветка чипа не ждёт сеть: выбор виден в том же кадре, что клик
   const [selected, setSelected] = useState(EXAMPLES[0].q);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [series, setSeries] = useState<IviSeries | null>(null);
-  const [pinned, setPinned] = useState(false);
-  const [hovered, setHovered] = useState(false);
-  const [typing, setTyping] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  // После выбора панель остаётся закрытой, пока курсор не уйдёт с неё и не вернётся
-  const holdCollapsed = useRef(false);
   // Быстрые клики по чипам идут внахлёст: ответ отставшего запроса нужно выбросить
   const requestRef = useRef(0);
-
-  const expanded = pinned || hovered || typing;
 
   const load = useCallback(async (nextQuery: string) => {
     const token = (requestRef.current += 1);
@@ -64,13 +74,6 @@ export function App() {
     }
   }, []);
 
-  function collapse() {
-    holdCollapsed.current = true;
-    setPinned(false);
-    setHovered(false);
-    inputRef.current?.blur();
-  }
-
   useEffect(() => {
     // Прогрев остальных пресетов после первого: переключение уходит в кэш
     void load(EXAMPLES[0].q).then(() => {
@@ -78,98 +81,125 @@ export function App() {
     });
   }, [load]);
 
+  // Фильм грузим лениво — при первом переходе на вкладку «Фильм»
+  useEffect(() => {
+    if (content !== "film" || film) return;
+    let cancelled = false;
+    void fetchIviFilm(FILM_URL).then(
+      (loaded) => {
+        if (!cancelled) setFilm(loaded);
+      },
+      () => {
+        // Фильм не загрузился — вкладка просто останется на спиннере
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [content, film]);
+
   // Ссылка на плеер должна быть стабильной, иначе memo на нём ничего не даёт
   const returnFocusToInput = useCallback(() => inputRef.current?.focus(), []);
 
+  // Какой контент отдать плееру: сериал-пресет или загруженный фильм
+  const shown = content === "film" ? film : series;
+
   return (
     <div className="app-shell">
-      <div
-        className={`picker${expanded ? " expanded" : ""}`}
-        onMouseEnter={() => {
-          if (!holdCollapsed.current) setHovered(true);
-        }}
-        onMouseMove={() => {
-          // mousemove идёт десятками событий в секунду: раскрываем панель один раз
-          if (!hovered && !holdCollapsed.current) setHovered(true);
-        }}
-        onMouseLeave={() => {
-          holdCollapsed.current = false;
-          setHovered(false);
-        }}
-      >
-        <div className="picker-plate">
-        <button type="button" className="picker-toggle" onClick={() => setPinned(true)}>
-          Выбрать сериал
-        </button>
-        <div className="picker-items">
-          <div className="preset-chips">
-            {EXAMPLES.map((item) => (
-              <button
-                key={item.q}
-                type="button"
-                className={`preset-chip${selected === item.q ? " active" : ""}`}
-                onClick={() => {
-                  setQuery(item.q);
-                  // Панель не схлопываем: иначе следующий пресет можно выбрать
-                  // только уведя курсор с панели и вернув обратно
-                  setPinned(false);
-                  void load(item.q);
+      {/*
+        Верхняя панель всегда раскрыта (не сворачивается). В фильме она невидима,
+        но место под неё остаётся — иначе плеер и кнопки (спозиционированы
+        относительно .player-region) прыгали бы вверх при переключении.
+      */}
+      <div className={`picker expanded${content === "film" ? " picker-hidden" : ""}`}>
+          <div className="picker-plate">
+            <div className="picker-items">
+              <div className="preset-chips">
+                {EXAMPLES.map((item) => (
+                  <button
+                    key={item.q}
+                    type="button"
+                    className={`preset-chip${selected === item.q ? " active" : ""}`}
+                    onClick={() => {
+                      setQuery(item.q);
+                      void load(item.q);
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <form
+                className="link-row"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  inputRef.current?.blur();
+                  void load(query);
                 }}
               >
-                {item.label}
-              </button>
-            ))}
+                <input
+                  ref={inputRef}
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Ссылка на сериал ivi.ru"
+                />
+                <button type="submit">{loading ? "Загрузка…" : "Смотреть"}</button>
+              </form>
+            </div>
           </div>
-          <form
-            className="link-row"
-            onSubmit={(event) => {
-              event.preventDefault();
-              collapse();
-              void load(query);
-            }}
-          >
-            <input
-              ref={inputRef}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onFocus={() => setTyping(true)}
-              onBlur={() => setTyping(false)}
-              placeholder="Ссылка на сериал ivi.ru"
-            />
-            <button type="submit">{loading ? "Загрузка…" : "Смотреть"}</button>
-          </form>
-        </div>
-        </div>
       </div>
 
       {error ? <div className="search-error">{error}</div> : null}
 
       <div className="player-region">
-        <div className="mode-switch" role="group" aria-label="Вариант прототипа">
+        {/* Реком-настройка есть только у сериала — в фильме её не показываем */}
+        {content === "series" ? (
+          <div className="mode-switch" role="group" aria-label="Вариант прототипа">
+            <button
+              type="button"
+              className={`mode-btn${mode === "plain" ? " active" : ""}`}
+              aria-pressed={mode === "plain"}
+              onClick={() => setMode("plain")}
+            >
+              Без рекома
+            </button>
+            <button
+              type="button"
+              className={`mode-btn${mode === "recom" ? " active" : ""}`}
+              aria-pressed={mode === "recom"}
+              onClick={() => setMode("recom")}
+            >
+              С рекомом
+            </button>
+          </div>
+        ) : null}
+
+        <div className="content-switch" role="group" aria-label="Тип контента">
           <button
             type="button"
-            className={`mode-btn${mode === "plain" ? " active" : ""}`}
-            aria-pressed={mode === "plain"}
-            onClick={() => setMode("plain")}
+            className={`mode-btn${content === "series" ? " active" : ""}`}
+            aria-pressed={content === "series"}
+            onClick={() => setContent("series")}
           >
-            Без рекома
+            Сериал
           </button>
           <button
             type="button"
-            className={`mode-btn${mode === "recom" ? " active" : ""}`}
-            aria-pressed={mode === "recom"}
-            onClick={() => setMode("recom")}
+            className={`mode-btn${content === "film" ? " active" : ""}`}
+            aria-pressed={content === "film"}
+            onClick={() => setContent("film")}
           >
-            С рекомом
+            Фильм
           </button>
         </div>
 
         <div className="player-stage">
-        {series ? (
+        {shown ? (
           <PlayerScreen
-            key={`${loaded}::${mode}`}
+            key={`${content === "film" ? FILM_URL : loaded}::${mode}::${content}`}
             variant={mode}
-            series={series}
+            content={content}
+            series={shown}
             onExit={returnFocusToInput}
           />
         ) : (
@@ -179,7 +209,7 @@ export function App() {
             плеера, поэтому загрузка выглядит одним непрерывным состоянием
           */
           <div className="player-wrap">
-            {loading ? (
+            {loading || (content === "film" && !film) ? (
               <div className="player-loader" role="presentation" aria-hidden="true">
                 <i className="player-spinner" />
               </div>

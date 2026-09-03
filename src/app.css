@@ -51,7 +51,21 @@ input {
    центр на 324px). Левый край плеера — на (50vw − 576px); правый край кнопок
    ставим на 24px левее и растим влево. На узких окнах прижимаем к краю (минимум
    12px), чтобы кнопки не уехали за край, а не прятались */
+/* Переключатель «Без рекома» / «С рекомом» — справа от ТВ (только для сериала) */
 .mode-switch {
+  position: absolute;
+  top: 324px;
+  transform: translateY(-50%);
+  right: max(-252px, calc(492px - 50vw));
+  width: 132px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 10;
+}
+
+/* Переключатель «Сериал» / «Фильм» — слева от ТВ */
+.content-switch {
   position: absolute;
   top: 324px;
   transform: translateY(-50%);
@@ -95,6 +109,12 @@ input {
   height: 40px;
   margin-bottom: 16px;
   /* Курсор ловит только плашка, поэтому в свёрнутом виде это площадь кнопки */
+  pointer-events: none;
+}
+
+/* В фильме панель невидима, но место под неё сохраняется — плеер и кнопки не прыгают */
+.picker.picker-hidden {
+  visibility: hidden;
   pointer-events: none;
 }
 
@@ -345,11 +365,16 @@ input {
   pointer-events: none;
   opacity: 0;
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.55) 0%, rgb(0, 0, 0) 100%);
-  transition: opacity var(--duration-scrim) ease;
+  transition: opacity var(--duration-scrim) ease, background var(--duration-scrim) ease;
 }
 
 .player-wrap.browsing .scrim {
   opacity: 1;
+}
+
+/* Обе галереи раскрыты полностью (шторка поднята, raised) — затемняем фон сильнее */
+.player-wrap:has(.series-layer.raised) .scrim {
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.82) 0%, rgb(0, 0, 0) 55%);
 }
 
 .controls-layer,
@@ -991,6 +1016,8 @@ input {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* Первая строка (описание) серая вне фокуса, белая — в фокусе */
+  color: var(--color-axum);
 }
 
 .episode-card small {
@@ -998,12 +1025,251 @@ input {
   margin-top: 4px;
   font-size: 13px;
   line-height: 16px;
-  color: rgb(255 255 255 / 0.56);
+  /* Вторая строка меты всегда белая */
+  color: var(--color-sofala);
 }
 
 .episode-card.focused .poster {
   outline: var(--poster-focus-ring) solid var(--color-sofala);
   outline-offset: var(--poster-focus-offset);
+}
+
+/* Подпись серии в фокусе белеет (Figma: «Серия 1» белая, остальные приглушены) */
+.episode-card.focused p {
+  color: var(--color-sofala);
+}
+
+/* Иконка «в эфире сейчас» перед номером текущей серии */
+.episode-card .onair-icon {
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  vertical-align: -1px;
+  flex: none;
+}
+
+/* ===== Вариант «С рекомом» ===== */
+
+/* Крупные постеры 224×126 (базовые 152×86). --card-h переопределяем явно:
+   на :root он уже посчитан с базовым --poster-h (var() подставляется в месте
+   объявления, а не использования), поэтому здесь его нужно задать заново */
+.player-wrap[data-variant="recom"] {
+  --poster-w: 224px;
+  --poster-h: 126px;
+  --card-h: calc(
+    126px + 12px + var(--typo-amphiris-line) + 4px + var(--typo-kleodora-line)
+  );
+}
+
+/* Шторка recom в две ступени.
+   Ступень 1 (фокус на первой галерее): первая галерея видна целиком, вторая
+   выглядывает снизу ровно на 24px постеров. Раскладка сверху вниз:
+   Ступень 1: видна первая галерея целиком и заголовок второй, её постеры торчат
+   на 24px. Постеры ряда2: сезоны 40 + gap 16 + ряд1 178 + (gap 16 + margin 16) +
+   заголовок 22 + gap 18 = top+306; чтобы кадр (540) резал их на 24px → top = 210. */
+.player-wrap[data-variant="recom"] .series-layer.open {
+  top: 210px;
+  gap: 16px;
+}
+
+/* Ступень 2 (фокус ушёл во вторую галерею): весь блок поднимается — видны обе
+   галереи целиком. Низ блока (~484) + top 24 = 508, т.е. 32px до нижней границы. */
+.player-wrap[data-variant="recom"] .series-layer.open.raised {
+  top: 24px;
+}
+
+/* Пока нижняя галерея только выглядывает снизу (ступень 1), её постеры
+   затемнены — как свёрнутый ряд. Когда блок поднимается (raised), затемнение
+   снимается вместе с фокусом. Затемняем именно нижнюю полку (:last-child),
+   иначе в фильме потемнела бы и верхняя галерея. */
+.player-wrap[data-variant="recom"] .series-layer.open:not(.raised) .recom-shelf:last-child .poster::after {
+  opacity: var(--opacity-pake);
+}
+
+/* Пока смотрим контент (шторка закрыта), заголовков галерей не видно — снизу
+   торчат только постеры на 24px. Заголовки появляются, как только спускаемся
+   на постеры (шторка открывается). */
+.series-layer:not(.open) .recom-heading {
+  display: none;
+}
+
+/* ---- Фильм: две галереи вместо ряда серий и табов сезонов ----
+   Закрытая шторка (смотрим фильм): заголовков нет, снизу торчат постеры первой
+   галереи на 24px — постеры стоят на y=516. */
+.player-wrap[data-content="film"] .series-layer {
+  top: 516px;
+}
+
+/* Ступень 1: первая галерея целиком + заголовок второй, её постеры торчат 24px.
+   Постеры ряда2: ряд1 (заголовок 22 + gap 18 + постеры 178) + (gap 16 + margin 16)
+   + заголовок 22 + gap 18 = top+290; при 24px пика → top = 226. */
+.player-wrap[data-content="film"] .series-layer.open {
+  top: 226px;
+}
+
+/* Раскрыты обе галереи фильма: низ блока (~468) + top 40 = 508 — 32px до края */
+.player-wrap[data-content="film"] .series-layer.open.raised {
+  top: 40px;
+}
+
+/* Верхняя полка стоит вплотную к своему верху — без отступа между галереями */
+.player-wrap[data-content="film"] .recom-shelf:first-child {
+  margin-top: 0;
+}
+
+/* Полка рекомендаций «От того же режиссёра» под рядом серий.
+   margin-top в сумме с gap шторки (16) даёт удвоенный отступ между галереями (32);
+   gap внутри — расстояние между заголовком и постерами второй галереи */
+.recom-shelf {
+  display: flex;
+  flex-direction: column;
+  /* Отступ заголовок → постеры чуть больше исходного (было 12px) */
+  gap: 18px;
+  margin-top: 16px;
+}
+
+.recom-heading {
+  margin: 0;
+  font-size: var(--typo-eralato-size);
+  line-height: var(--typo-eralato-line);
+  font-weight: 700;
+  color: var(--color-sofala);
+}
+
+/* Карточка рекомендации «Смотрят вместе с …»: та же геометрия, что у карточки
+   серии (постер + название + год), но без платной рамки/шильда */
+.rec-card {
+  width: var(--poster-w);
+  flex: none;
+  color: var(--color-sofia);
+}
+
+.rec-card p {
+  margin: 12px 0 0;
+  font-size: var(--typo-amphiris-size);
+  line-height: var(--typo-amphiris-line);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Первая строка (описание) серая вне фокуса, белая — в фокусе */
+  color: var(--color-axum);
+}
+
+.rec-card.focused p {
+  color: var(--color-sofala);
+}
+
+.rec-card small {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--typo-kleodora-size);
+  line-height: var(--typo-kleodora-line);
+  /* Вторая строка меты всегда белая */
+  color: var(--color-sofala);
+}
+
+/* Жанр и длительность в одну строку с зазором, жанр — первым (Figma 299:21939) */
+.rec-card small.rec-meta {
+  display: flex;
+  gap: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rec-card small.rec-meta span {
+  flex: none;
+}
+
+/* Блогерская мета — вторая строка, тоже всегда белая */
+.rec-card small.rec-meta-blogger .rec-author {
+  color: var(--color-sofala);
+}
+
+.rec-card.focused .poster {
+  outline: var(--poster-focus-ring) solid var(--color-sofala);
+  outline-offset: var(--poster-focus-offset);
+}
+
+/* ---- Платный контент в recom: у ЗАКРЫТОЙ серии в фокусе градиентная рамка + шильд.
+   Доступная серия не метится ничем: у неё обычная белая обводка фокуса. ---- */
+
+.player-wrap[data-variant="recom"][data-paid="true"] .episode-card {
+  position: relative;
+}
+
+/* Градиентная рамка заменяет белую обводку только у серии под замком */
+.player-wrap[data-variant="recom"][data-paid="true"] .episode-card.locked.focused .poster {
+  outline: none;
+}
+
+/* Та же геометрия, что у обводки фокуса (2px линия, отступ 4px, радиус постера),
+   но градиент FD5801 → D5BD01 из левого нижнего угла в правый верхний, со
+   свечением. Кольцо рисуем маской по краю псевдоэлемента, вынесенного за постер
+   (у .poster overflow: hidden, внутри его не показать). */
+.player-wrap[data-variant="recom"][data-paid="true"] .episode-card.locked.focused::before {
+  content: "";
+  position: absolute;
+  /* box-sizing нужно задать явно: глобальное * на псевдоэлементы не действует,
+     иначе padding уходит наружу и правый/нижний отступы становятся больше */
+  box-sizing: border-box;
+  left: -6px;
+  top: -6px;
+  width: calc(var(--poster-w) + 12px);
+  height: calc(var(--poster-h) + 12px);
+  border-radius: calc(var(--poster-radius) + 6px);
+  padding: 2px;
+  background: linear-gradient(to top right, #fd5801, #d5bd01);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  filter:
+    drop-shadow(0 0 4px rgba(253, 88, 1, 0.55))
+    drop-shadow(0 0 12px rgba(213, 189, 1, 0.3));
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Шильд «По подписке» перед длительностью в подписи карточки в фокусе:
+   шильд и длительность идут в одну строку под номером серии */
+.episode-card .paid-shield {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: middle;
+  margin-top: 4px;
+  margin-right: 6px;
+}
+
+.episode-card .paid-shield-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+  flex: none;
+}
+
+.episode-card .paid-shield-text {
+  font-size: var(--typo-kleodora-size);
+  line-height: var(--typo-kleodora-line);
+  font-weight: 500;
+  white-space: nowrap;
+  background: linear-gradient(to top right, #fd5801, #d5bd01);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+.episode-card small.episode-paid-duration {
+  display: inline;
+  color: var(--color-sofala);
+  font-size: var(--typo-kleodora-size);
+  line-height: var(--typo-kleodora-line);
+  font-weight: 500;
+  vertical-align: middle;
 }
 
 .panel {

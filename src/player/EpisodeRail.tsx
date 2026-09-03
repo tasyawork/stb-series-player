@@ -5,9 +5,8 @@ import { usePlayhead } from "./playhead";
 import { formatMinutes } from "./time";
 
 /** Episode из Figma 1299:10371: постер 152×86, шаг ряда держим синхронно с --poster-w */
-const CARD_W = 152;
-const GAP = 16;
-const CARD_STEP = CARD_W + GAP;
+const DEFAULT_CARD_W = 152;
+const DEFAULT_GAP = 16;
 /** Полоса от 68px до 68px от правого края плеера (960 − 68 × 2) */
 const WINDOW = 824;
 
@@ -19,6 +18,11 @@ type EpisodeRailProps = {
   focusedIndex: number | null;
   /** Позиция ряда: сохраняется, когда фокус уходит из серий на кнопки под ними */
   anchorIndex: number;
+  /** Ширина карточки и зазор для расчёта прокрутки: держим равными --poster-w/--poster-gap */
+  cardWidth?: number;
+  gap?: number;
+  /** Платный тайтл (recom): у карточки в фокусе шильд «По подписке» перед длительностью */
+  paid?: boolean;
 };
 
 /*
@@ -33,18 +37,32 @@ export const EpisodeRail = memo(function EpisodeRail({
   duration,
   focusedIndex,
   anchorIndex,
+  cardWidth = DEFAULT_CARD_W,
+  gap = DEFAULT_GAP,
+  paid = false,
 }: EpisodeRailProps) {
-  const trackWidth = episodes.length * CARD_STEP - GAP;
+  const cardStep = cardWidth + gap;
+  const trackWidth = episodes.length * cardStep - gap;
   // На конце списка ряд упирается правым краем постера в границу окна
   const maxOffset = Math.max(0, trackWidth - WINDOW);
   // Серия в фокусе встаёт на первую позицию ряда, пройденные уходят за левый край плеера
-  const offset = Math.min(Math.max(0, anchorIndex) * CARD_STEP, maxOffset);
+  const offset = Math.min(Math.max(0, anchorIndex) * cardStep, maxOffset);
 
   return (
     <div className="rail-viewport">
       <div className="rail" style={{ transform: `translateX(${-offset}px)` }}>
         {episodes.map((episode, index) => {
           const current = episode.id === currentId;
+          const focused = focusedIndex === index;
+          /*
+            Шильд «По подписке» и градиентная рамка — только у серии под замком.
+            Доступную серию ничем не метим: у неё в фокусе обычная белая обводка
+            и никакого шильда, даже если сам тайтл подписочный.
+          */
+          const showShield = paid && focused && episode.isLocked;
+          // Тайминг показываем у открытых серий, а у закрытых — только в фокусе платного тайтла
+          const showDuration =
+            episode.availability === "available" && (!episode.isLocked || paid);
           return (
             <div
               key={episode.id}
@@ -66,9 +84,23 @@ export const EpisodeRail = memo(function EpisodeRail({
                 ) : null}
                 {current ? <PosterProgress playhead={playhead} duration={duration} /> : null}
               </div>
-              <p>{episode.episode} серия</p>
-              <small className={episode.availability !== "available" || episode.isLocked ? "empty" : ""}>
-                {episode.availability === "available" && !episode.isLocked
+              <p>
+                {current ? <OnAirIcon /> : null}
+                {episode.episode} серия
+              </p>
+              {showShield ? (
+                // Платный тайтл: шильд «По подписке» перед длительностью у карточки в фокусе
+                <span className="paid-shield">
+                  <img className="paid-shield-icon" src="/icons/subscription-badge.png" alt="" />
+                  <span className="paid-shield-text">По подписке</span>
+                </span>
+              ) : null}
+              <small
+                className={`${showDuration ? "" : "empty"}${
+                  paid && focused ? " episode-paid-duration" : ""
+                }`}
+              >
+                {showDuration
                   ? formatMinutes(episode.durationSec)
                   : "\u00a0"}
               </small>
@@ -79,6 +111,29 @@ export const EpisodeRail = memo(function EpisodeRail({
     </div>
   );
 });
+
+/*
+  Иконка «в эфире сейчас» перед названием текущей серии (Figma 299:21806).
+  Заливка currentColor: у серии в фокусе подпись белеет — вместе с ней белеет
+  и треугольник, у остальных остаётся приглушённым цветом подписи.
+*/
+function OnAirIcon() {
+  return (
+    <svg
+      className="onair-icon"
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M5.40762 2.04457L8.7844 4.07064C10.2204 4.93224 10.9384 5.36304 10.9384 6C10.9384 6.63696 10.2204 7.06776 8.7844 7.92936L5.40762 9.95543C3.89682 10.8619 3.14143 11.3151 2.57071 10.992C2 10.6689 2 9.78794 2 8.02607V3.97393C2 2.21206 2 1.33112 2.57071 1.00799C3.14143 0.684856 3.89682 1.13809 5.40762 2.04457Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
 
 function PosterProgress({ playhead, duration }: { playhead: PlayheadStore; duration: number }) {
   const current = usePlayhead(playhead);

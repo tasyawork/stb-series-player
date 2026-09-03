@@ -3,6 +3,7 @@ import type { IviEpisode, IviSeries } from "../ivi/types";
 import { EpisodeRail } from "./EpisodeRail";
 import { NotifyButton } from "./NotifyButton";
 import { createPlayhead } from "./playhead";
+import { RecommendationRail } from "./RecommendationRail";
 import { SeasonTabs } from "./SeasonTabs";
 import { Seekbar } from "./Seekbar";
 import { SubscriptionButton } from "./SubscriptionButton";
@@ -13,7 +14,7 @@ const ROWS = [
   ["seek"],
   ["seasons"],
   ["episodes"],
-  ["subscription", "notify"],
+  ["subscription", "notify", "recom"],
 ] as const;
 
 type Focus =
@@ -27,7 +28,8 @@ type Focus =
   | "seasons"
   | "episodes"
   | "notify"
-  | "subscription";
+  | "subscription"
+  | "recom";
 
 const CONTROLS_ROW = 1;
 const BROWSE_ROW = 3;
@@ -47,13 +49,22 @@ type PanelOption = { kind: "quality" | "audio" | "subtitle"; value: string };
 // Пока оба ведут себя одинаково; крючок для будущих правок второго варианта.
 type PlayerVariant = "plain" | "recom";
 
+// Тип контента: сериал (серии с табами сезонов) или фильм (две галереи)
+type PlayerContent = "series" | "film";
+
 type PlayerScreenProps = {
   series: IviSeries;
   onExit: () => void;
   variant?: PlayerVariant;
+  content?: PlayerContent;
 };
 
-function PlayerScreenView({ series, onExit, variant = "plain" }: PlayerScreenProps) {
+function PlayerScreenView({
+  series,
+  onExit,
+  variant = "plain",
+  content = "series",
+}: PlayerScreenProps) {
   const [activeSeason, setActiveSeason] = useState(series.loadedSeason);
   // Открываем сезон на серии, которую действительно можно смотреть: под замком
   // играть нечего, поэтому запертая серия годится только как последний вариант
@@ -70,6 +81,8 @@ function PlayerScreenView({ series, onExit, variant = "plain" }: PlayerScreenPro
   const [playing, setPlaying] = useState(true);
   const [focus, setFocus] = useState<Focus>("pause");
   const [railIndex, setRailIndex] = useState(0);
+  // Фокус во второй галерее «От того же режиссёра» (только вариант recom)
+  const [recomIndex, setRecomIndex] = useState(0);
   const [panel, setPanel] = useState<"quality" | "audio" | null>(null);
   const [panelIndex, setPanelIndex] = useState(0);
   const [quality, setQuality] = useState("Авто");
@@ -162,6 +175,37 @@ function PlayerScreenView({ series, onExit, variant = "plain" }: PlayerScreenPro
   const hasLockedEpisodes = useMemo(() => playlist.some((item) => item.isLocked), [playlist]);
   const showSubscriptionOffer =
     !series.subscriptionActive && (series.subscriptionRequired || hasLockedEpisodes);
+
+  // Вариант «С рекомом»: постеры крупнее (224×126), нижних кнопок нет, а под
+  // рядом серий добавлена полка «От того же режиссёра». variant приходит из App
+  // и не меняется в течение монтирования (смена вкладки перемонтирует плеер).
+  /*
+    Фильм показывает две галереи вместо серий, поэтому наследует раскладку
+    «С рекомом» (крупные постеры, двухступенчатая шторка) независимо от левого
+    переключателя. Обе галереи наполнены рекомендациями «Смотрят вместе с».
+  */
+  const isFilm = content === "film";
+  const isRecom = variant === "recom" || isFilm;
+  const railCardWidth = isRecom ? 224 : 152;
+  /*
+    Две галереи фильма: берём готовые именованные подборки (series.galleries),
+    а если их нет — откатываемся на общий ряд рекомендаций (вторую полку
+    разворачиваем, чтобы она не читалась как дубль первой).
+  */
+  const filmTop = isFilm ? series.galleries?.[0] : undefined;
+  const filmBottom = isFilm ? series.galleries?.[1] : undefined;
+  const filmTopItems = filmTop?.items ?? series.recommendations;
+  const filmBottomRow = useMemo(
+    () => (isFilm ? [...series.recommendations].reverse() : series.recommendations),
+    [isFilm, series.recommendations],
+  );
+  const filmBottomItems = filmBottom?.items ?? filmBottomRow;
+  const filmTopTitle = filmTop?.title ?? `Смотрят вместе с «${series.title}»`;
+  const filmBottomTitle = filmBottom?.title ?? "Похожие фильмы";
+  // Платный тайтл в recom: у постера в фокусе градиентная рамка вместо белой
+  // обводки и шильд «По подписке» в подписи. Триггер — подписочный контент
+  // (SVOD/платные сезоны); тариф (Старт, Медиатека…) роли не играет.
+  const paidBadge = isRecom && series.subscriptionRequired;
 
   const qualityOptions = useMemo(
     () => ["Авто", ...series.capabilities.qualities.filter((item) => item !== "Авто")],
@@ -361,6 +405,7 @@ function PlayerScreenView({ series, onExit, variant = "plain" }: PlayerScreenPro
     (season: number) => {
       setActiveSeason(season);
       setRailIndex(0);
+      setRecomIndex(0);
     },
     [],
   );
@@ -369,10 +414,10 @@ function PlayerScreenView({ series, onExit, variant = "plain" }: PlayerScreenPro
   const hasPrev = playableIndex > 0;
   const hasNext = playableIndex >= 0 && playableIndex < playableEpisodes.length - 1;
 
-  // На последней серии кнопка вперёд скрыта, держать на ней фокус нельзя
+  // Кнопка «вперёд» скрыта на последней серии и во всём фильме — фокус на ней держать нельзя
   useEffect(() => {
-    if (focus === "next" && !hasNext) setFocus("pause");
-  }, [focus, hasNext]);
+    if (focus === "next" && (!hasNext || isFilm)) setFocus("pause");
+  }, [focus, hasNext, isFilm]);
 
   const goRelative = useCallback(
     (delta: number) => {
@@ -418,6 +463,8 @@ function PlayerScreenView({ series, onExit, variant = "plain" }: PlayerScreenPro
         window.open(series.iviUrl, "_blank", "noopener,noreferrer");
       }
       if (id === "episodes") {
+        // В фильме галерея — рекомендации-заглушки, выбирать в ней нечего
+        if (isFilm) return;
         const chosen = seasonEpisodes[railIndex];
         if (chosen?.isLocked) {
           showToast("Оформите подписку, чтобы смотреть эту серию");
@@ -438,6 +485,7 @@ function PlayerScreenView({ series, onExit, variant = "plain" }: PlayerScreenPro
       audio,
       goRelative,
       hasPrev,
+      isFilm,
       onExit,
       playhead,
       quality,
@@ -452,8 +500,10 @@ function PlayerScreenView({ series, onExit, variant = "plain" }: PlayerScreenPro
 
   useEffect(() => {
     function isReachable(id: Focus) {
-      if (id === "next") return hasNext;
-      if (id === "subscription") return showSubscriptionOffer;
+      if (id === "next") return hasNext && !isFilm;
+      if (id === "subscription") return !isRecom && showSubscriptionOffer;
+      if (id === "notify") return !isRecom;
+      if (id === "recom") return isRecom;
       return true;
     }
 
@@ -543,7 +593,14 @@ function PlayerScreenView({ series, onExit, variant = "plain" }: PlayerScreenPro
           return;
         }
         if (focus === "episodes") {
-          setRailIndex((value) => Math.max(0, Math.min(seasonEpisodes.length - 1, value + step)));
+          // В фильме верхняя галерея — карточки подборки, а не серии
+          const last = (isFilm ? filmTopItems.length : seasonEpisodes.length) - 1;
+          setRailIndex((value) => Math.max(0, Math.min(last, value + step)));
+          return;
+        }
+        if (focus === "recom") {
+          const last = (isFilm ? filmBottomItems.length : series.recommendations.length) - 1;
+          setRecomIndex((value) => Math.max(0, Math.min(last, value + step)));
           return;
         }
         if (focus === "seasons") {
@@ -564,19 +621,25 @@ function PlayerScreenView({ series, onExit, variant = "plain" }: PlayerScreenPro
           } else if (focusRow === CONTROLS_ROW) {
             setFocus("seek");
           } else if (focus === "seek") {
-            focusEpisodesIn(episode?.season ?? activeSeason);
+            // В фильме серий и сезонов нет — сразу в верхнюю галерею
+            if (isFilm) setFocus("episodes");
+            else focusEpisodesIn(episode?.season ?? activeSeason);
           } else if (focus === "seasons") {
             focusEpisodesIn(activeSeason);
           } else if (focus === "episodes") {
-            setFocus(showSubscriptionOffer ? "subscription" : "notify");
+            // recom: вниз — во вторую галерею (шторка поднимается выше);
+            // обычный вариант: на кнопки подписки/уведомления
+            if (isRecom) setFocus("recom");
+            else setFocus(showSubscriptionOffer ? "subscription" : "notify");
           }
           return;
         }
 
-        if (focus === "notify" || focus === "subscription") {
+        if (focus === "notify" || focus === "subscription" || focus === "recom") {
           setFocus("episodes");
         } else if (focus === "episodes") {
-          setFocus("seasons");
+          // В фильме над галереей нет табов сезонов — уходим сразу на таймлайн
+          setFocus(isFilm ? "seek" : "seasons");
         } else if (focus === "seasons") {
           setFocus("seek");
         } else if (focus === "seek") {
@@ -597,15 +660,21 @@ function PlayerScreenView({ series, onExit, variant = "plain" }: PlayerScreenPro
     episode?.id,
     episode?.season,
     episodesBySeason,
+    filmBottomItems.length,
+    filmTopItems.length,
     focus,
     focusRow,
+    isFilm,
+    isRecom,
     onExit,
     panel,
     panelIndex,
     panelOptions,
     playhead,
+    recomIndex,
     seasonEpisodes.length,
     selectSeason,
+    series.recommendations.length,
     series.seasons,
     showSubscriptionOffer,
     wakeControls,
@@ -620,7 +689,9 @@ function PlayerScreenView({ series, onExit, variant = "plain" }: PlayerScreenPro
       {/* Управление только с пульта: мышь внутри плеера отключена в стилях */}
       <div
         className={`player-wrap${browsing ? " browsing" : ""}${controlsVisible ? "" : " idle"}`}
-        data-variant={variant}
+        data-variant={isRecom ? "recom" : "plain"}
+        data-content={content}
+        data-paid={paidBadge ? "true" : undefined}
       >
         {/* Есть локальный файл — видео монтируется сразу и без poster: любой статичный
             кадр перед стартом выглядит как заглушка, а ожидание и так показывает спиннер.
@@ -675,9 +746,12 @@ function PlayerScreenView({ series, onExit, variant = "plain" }: PlayerScreenPro
             ) : (
               <h2>{series.title}</h2>
             )}
-            <span>
-              Серия {episode.episode} сезон {episode.season}
-            </span>
+            {/* У фильма нет серий и сезонов — подпись показываем только у сериала */}
+            {isFilm ? null : (
+              <span>
+                Серия {episode.episode} сезон {episode.season}
+              </span>
+            )}
           </div>
           <div className="transport">
             <div className={`icon-btn${focus === "prev" ? " focused" : ""}`}>
@@ -689,7 +763,8 @@ function PlayerScreenView({ series, onExit, variant = "plain" }: PlayerScreenPro
                 alt={playing ? "Пауза" : "Пуск"}
               />
             </div>
-            {hasNext ? (
+            {/* У фильма нет следующей серии — кнопку «далее» не показываем */}
+            {hasNext && !isFilm ? (
               <div className={`icon-btn${focus === "next" ? " focused" : ""}`}>
                 <img src="/icons/next.svg" alt="Следующая серия" />
               </div>
@@ -717,26 +792,61 @@ function PlayerScreenView({ series, onExit, variant = "plain" }: PlayerScreenPro
           />
         </div>
 
-        <div className={`series-layer${browsing ? " open" : ""}`}>
-          <SeasonTabs
-            seasons={series.seasons}
-            activeSeason={activeSeason}
-            focusedSeason={focus === "seasons" ? activeSeason : null}
-          />
-          <EpisodeRail
-            episodes={seasonEpisodes}
-            currentId={episode.id}
-            playhead={playhead}
-            duration={episode.durationSec}
-            focusedIndex={focus === "episodes" ? railIndex : null}
-            anchorIndex={railIndex}
-          />
-          <div className="series-actions">
-            {showSubscriptionOffer ? (
-              <SubscriptionButton focused={focus === "subscription"} />
-            ) : null}
-            <NotifyButton active={notify} focused={focus === "notify"} />
-          </div>
+        <div
+          className={`series-layer${browsing ? " open" : ""}${
+            isRecom && focus === "recom" ? " raised" : ""
+          }`}
+        >
+          {isFilm ? (
+            /* Верхняя галерея фильма вместо ряда серий */
+            <div className="recom-shelf">
+              <h3 className="recom-heading">{filmTopTitle}</h3>
+              <RecommendationRail
+                items={filmTopItems}
+                focusedIndex={focus === "episodes" ? railIndex : null}
+                anchorIndex={railIndex}
+                cardWidth={railCardWidth}
+              />
+            </div>
+          ) : (
+            <>
+              <SeasonTabs
+                seasons={series.seasons}
+                activeSeason={activeSeason}
+                focusedSeason={focus === "seasons" ? activeSeason : null}
+              />
+              <EpisodeRail
+                episodes={seasonEpisodes}
+                currentId={episode.id}
+                playhead={playhead}
+                duration={episode.durationSec}
+                focusedIndex={focus === "episodes" ? railIndex : null}
+                anchorIndex={railIndex}
+                cardWidth={railCardWidth}
+                paid={paidBadge}
+              />
+            </>
+          )}
+          {isRecom ? (
+            <div className="recom-shelf">
+              <h3 className="recom-heading">
+                {isFilm ? filmBottomTitle : `Смотрят вместе с «${series.title}»`}
+              </h3>
+              <RecommendationRail
+                items={isFilm ? filmBottomItems : series.recommendations}
+                focusedIndex={focus === "recom" ? recomIndex : null}
+                anchorIndex={recomIndex}
+                cardWidth={railCardWidth}
+              />
+            </div>
+          ) : (
+            <div className="series-actions">
+              {showSubscriptionOffer ? (
+                <SubscriptionButton focused={focus === "subscription"} />
+              ) : null}
+              <NotifyButton active={notify} focused={focus === "notify"} />
+            </div>
+          )}
         </div>
 
         {panel === "quality" ? (

@@ -1,5 +1,6 @@
 import { parseIviQuery } from "./parseIvi";
-import type { IviEpisode, IviSeries } from "./types";
+import { formatDuration } from "../player/time";
+import type { IviEpisode, IviRecommendation, IviSeries } from "./types";
 
 const API_HOSTS = import.meta.env.DEV
   ? ["https://api.ivi.ru/mobileapi", "https://api2.ivi.ru/mobileapi"]
@@ -26,7 +27,7 @@ const CARD_FIELDS = [
   "id", "hru", "title", "years", "restrict", "duration", "short_description",
   "synopsis", "description", "posters", "promo_images", "share_link",
   "episode_count", "has_upcoming_episodes", "shields", "content_paid_types",
-  "subscription_names", "localizations", "subtitles", "hd_available",
+  "genres", "subscription_names", "localizations", "subtitles", "hd_available",
   "fullhd_available", "uhd_available_all", "has_5_1", "fake", "seasons",
 ].join(",");
 const EPISODE_PAGE_SIZE = 100;
@@ -60,6 +61,8 @@ type Card = {
   hru?: string;
   title: string;
   years?: number[];
+  // videoinfo (фильм) отдаёт один год, а не массив
+  year?: number;
   restrict?: number;
   duration?: number;
   short_description?: string;
@@ -67,6 +70,7 @@ type Card = {
   description?: string;
   posters?: Image[];
   promo_images?: Image[];
+  thumbs?: Image[];
   share_link?: string;
   episode_count?: number;
   has_upcoming_episodes?: boolean;
@@ -77,6 +81,7 @@ type Card = {
   uhd_available_all?: boolean;
   has_5_1?: boolean;
   content_paid_types?: string[];
+  genres?: number[];
   fake?: boolean;
   seasons?: RawSeason[];
 };
@@ -156,6 +161,125 @@ export function fetchIviSeries(
   return request;
 }
 
+/*
+  Фильм для варианта «Фильм»: mobileapi отдаёт его через videoinfo/v7, а не
+  compilationinfo. Плеер устроен вокруг серий, поэтому фильм заворачиваем в тот
+  же IviSeries с единственным «эпизодом» — самим фильмом; ряд серий в фильме всё
+  равно скрыт, а две галереи берут рекомендации (kind=1). Кэш свой, чтобы клик
+  по вкладке «Фильм» не ждал сеть повторно.
+*/
+const FILM_FIELDS = [
+  "id", "hru", "title", "year", "years", "restrict", "duration", "short_description",
+  "synopsis", "description", "posters", "promo_images", "thumbs", "share_link",
+  "genres", "localizations", "subtitles", "hd_available", "fullhd_available",
+  "uhd_available_all", "has_5_1", "content_paid_types",
+].join(",");
+const filmCache = new Map<string, { series: IviSeries; at: number }>();
+const filmInflight = new Map<string, Promise<IviSeries>>();
+
+export function fetchIviFilm(query: string): Promise<IviSeries> {
+  const slug = safeSlug(query);
+  const key = slug ?? query;
+  const pending = filmInflight.get(key);
+  if (pending) return pending;
+  const request = loadIviFilm(query)
+    .then((series) => {
+      filmCache.set(key, { series, at: Date.now() });
+      return series;
+    })
+    .finally(() => filmInflight.delete(key));
+  filmInflight.set(key, request);
+  return request;
+}
+
+export function peekIviFilm(query: string): { series: IviSeries; stale: boolean } | null {
+  const key = safeSlug(query) ?? query;
+  const entry = filmCache.get(key);
+  if (!entry) return null;
+  return { series: entry.series, stale: Date.now() - entry.at > CACHE_TTL_MS };
+}
+
+function safeSlug(query: string): string | null {
+  try {
+    return parseIviQuery(query).slug;
+  } catch {
+    return null;
+  }
+}
+
+async function loadIviFilm(query: string): Promise<IviSeries> {
+  const parsed = parseIviQuery(query);
+  const card = await apiGet<Card>("videoinfo/v7/", {
+    id: parsed.slug,
+    fields: FILM_FIELDS,
+  });
+
+  /*
+    Две именованные галереи под конкретный фильм «Майкл». Самого́ фильма в них
+    нет — контент, который сейчас идёт, в рекомендациях не показываем.
+    1) «С фильмом „Майкл" смотрят» — рекомендации Иви под этот фильм (kind=1);
+    2) «Биографии» — популярное в жанре биографий.
+    Пересечения между полками убираем: тайтл из первой не повторяется во второй.
+  */
+  const [watchedWith, biographies] = await Promise.all([
+    fetchRecommendations(card.id, RECOMMENDATION_KIND_FILM),
+    genreRow(/биограф/i, card.id),
+  ]);
+  const usedIds = new Set(watchedWith.map((rec) => rec.id));
+  const biographiesUnique = biographies.filter((rec) => !usedIds.has(rec.id));
+  const galleries = [
+    { title: "С фильмом «Майкл» смотрят", items: watchedWith },
+    { title: "Биографии", items: biographiesUnique },
+  ];
+  const recommendations = watchedWith;
+
+  const backdrop =
+    imageByType(card.posters, "poster-horizontal") ||
+    imageByFormat(card.promo_images, "BackgroundImage-1280x720") ||
+    imageByFormat(card.promo_images, "BackgroundImage") ||
+    firstImage(card.posters);
+  const still = imageByFormat(card.thumbs, "Thumb-") || backdrop;
+  const localization = card.localizations?.find((item) => item.duration) ?? card.localizations?.[0];
+  const durationSec = localization?.duration || 90 * 60;
+
+  // Единственный «эпизод» — сам фильм: держит плеер (сикбар, метаданные) на плаву
+  const filmEpisode: IviEpisode = {
+    id: card.id,
+    title: card.title,
+    season: 1,
+    episode: 1,
+    durationSec,
+    poster: backdrop,
+    thumb: still,
+    iviUrl: card.share_link || parsed.url,
+    videoUrl: undefined,
+    markers: [0.28, 0.52, 0.74],
+    availability: "available",
+    isLocked: false,
+  };
+
+  return {
+    id: card.id,
+    slug: card.hru || parsed.slug,
+    title: card.title,
+    year: card.years?.[0] ?? card.year,
+    age: card.restrict,
+    description: card.short_description || card.synopsis || card.description || "",
+    poster: backdrop,
+    backdrop,
+    iviUrl: card.share_link || parsed.url,
+    seasons: [],
+    loadedSeason: 1,
+    episodes: [filmEpisode],
+    capabilities: buildCapabilities(card, [{ id: card.id, localizations: card.localizations }]),
+    hasUpcomingEpisodes: false,
+    subscriptionRequired: hasSvod(card.content_paid_types),
+    subscriptionActive: false,
+    recommendations,
+    galleries,
+  };
+}
+
 // Прогрев остальных пресетов: ошибку глотаем, это не запрос пользователя
 export async function prefetchIviSeries(
   query: string,
@@ -180,7 +304,10 @@ async function loadIviSeries(
     hru: parsed.slug,
     fields: CARD_FIELDS,
   });
-  const allRawEpisodes = await fetchAllEpisodes(card.id, card.episode_count);
+  const [allRawEpisodes, recommendations] = await Promise.all([
+    fetchAllEpisodes(card.id, card.episode_count),
+    fetchRecommendations(card.id),
+  ]);
   if (allRawEpisodes.length === 0) {
     throw new Error(`У сериала «${card.title}» не найдены серии`);
   }
@@ -273,11 +400,269 @@ async function loadIviSeries(
       episodes.some((episode) => episode.availability === "upcoming"),
     subscriptionRequired,
     subscriptionActive,
+    recommendations,
   };
 }
 
 function hasSvod(types?: string[]): boolean {
   return types?.includes("SVOD") ?? false;
+}
+
+// Сколько похожих тянем в галерею «Смотрят вместе с …»
+const RECOMMENDATION_LIMIT = 12;
+// kind у hydra обязателен: 2 — сериал (compilation), 1 — фильм/видео
+const RECOMMENDATION_KIND_SERIES = "2";
+const RECOMMENDATION_KIND_FILM = "1";
+
+type RecommendationItem = {
+  id: number;
+  title?: string;
+  short_description?: string;
+  synopsis?: string;
+  object_type?: string;
+  posters?: Image[];
+  year?: number;
+  years?: number[];
+  genres?: number[];
+  seasons?: { number?: number }[];
+  localizations?: Localization[];
+  ivi_release_date?: string;
+  // Каталог у фильма отдаёт длительность прямо числом секунд, без localizations
+  duration?: number;
+};
+
+/*
+  Блогерский контент на Иви узнаётся по жанру «Блогерское». У такой карточки
+  мета другая: имя автора и когда вышло, вместо жанра и длительности.
+*/
+function isBloggerGenre(name: string): boolean {
+  return /блогер/i.test(name);
+}
+
+/*
+  Выпуски Иви названы по правилу «Тема. АВТОР» — «Клеопатра. МИНАЕВ LIVE».
+  Автор — хвост названия после последней точки, а сама тема — всё до него.
+*/
+function authorTag(title: string): string {
+  const parts = title.split(/\.\s+/);
+  return parts.length > 1 ? parts[parts.length - 1].trim() : "";
+}
+
+function titleWithoutAuthor(title: string): string {
+  const parts = title.split(/\.\s+/);
+  return parts.length > 1 ? parts.slice(0, -1).join(". ").trim() : title.trim();
+}
+
+// «сегодня» / «3 дня назад» / «1 месяц назад» — как в макете блогерской карточки
+function relativeRelease(date?: string): string {
+  const time = Date.parse(date ?? "");
+  if (Number.isNaN(time)) return "";
+  const days = Math.floor((Date.now() - time) / 86400000);
+  if (days <= 0) return "сегодня";
+  if (days === 1) return "вчера";
+  if (days < 7) return `${days} ${plural(days, "день", "дня", "дней")} назад`;
+  if (days < 30) {
+    const weeks = Math.floor(days / 7);
+    return `${weeks} ${plural(weeks, "неделю", "недели", "недель")} назад`;
+  }
+  if (days < 365) {
+    const months = Math.max(1, Math.floor(days / 30));
+    return `${months} ${plural(months, "месяц", "месяца", "месяцев")} назад`;
+  }
+  const years = Math.floor(days / 365);
+  return `${years} ${plural(years, "год", "года", "лет")} назад`;
+}
+
+function plural(count: number, one: string, few: string, many: string): string {
+  const teens = count % 100 >= 11 && count % 100 <= 14;
+  const last = count % 10;
+  if (!teens && last === 1) return one;
+  if (!teens && last >= 2 && last <= 4) return few;
+  return many;
+}
+
+/*
+  Названия жанров лежат отдельным справочником (categories/v5, жанры внутри
+  категорий) и за сеанс не меняются — тянем один раз и кэшируем промисом.
+  В карточке контента приходят только id жанров, названия берём отсюда.
+*/
+let genreDictionary: Promise<Map<number, string>> | null = null;
+
+function loadGenres(): Promise<Map<number, string>> {
+  if (genreDictionary) return genreDictionary;
+  genreDictionary = apiGet<{ genres?: { id: number; title?: string }[] }[]>("categories/v5/", {})
+    .then((categories) => {
+      const map = new Map<number, string>();
+      for (const category of categories) {
+        for (const genre of category.genres ?? []) {
+          if (genre.title) map.set(genre.id, genre.title);
+        }
+      }
+      return map;
+    })
+    .catch((error) => {
+      // Не удалось — следующая попытка начнётся заново, а мета просто без жанра
+      genreDictionary = null;
+      throw error;
+    });
+  return genreDictionary;
+}
+
+// «1 сезон» / «2 сезона» / «5 сезонов» — число сезонов в мете рекомендации-сериала
+function seasonsLabel(count: number): string {
+  const teens = count % 100 >= 11 && count % 100 <= 14;
+  const last = count % 10;
+  if (!teens && last === 1) return `${count} сезон`;
+  if (!teens && last >= 2 && last <= 4) return `${count} сезона`;
+  return `${count} сезонов`;
+}
+
+// Основной жанр с заглавной буквы, как на карточке Иви
+function upperFirst(value: string): string {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+}
+
+/*
+  «Смотрят вместе с …»: ряд «С сериалом „…" смотрят» с реального эндпоинта
+  рекомендаций ivi (hydra). Сессия не нужна — выдача просто не персонализирована.
+  Сам тайтл иногда попадает в ответ, поэтому фильтруем по id. Ошибку глотаем —
+  галерея просто останется пустой.
+*/
+async function fetchRecommendations(
+  id: number,
+  kind: string = RECOMMENDATION_KIND_SERIES,
+): Promise<IviRecommendation[]> {
+  try {
+    const [items, genres] = await Promise.all([
+      apiGet<RecommendationItem[]>("hydra/get/recommendation/v7/", {
+        id: String(id),
+        kind,
+        scenario_id: "ITEM_PAGE",
+        top: String(RECOMMENDATION_LIMIT + 2),
+        fields:
+          "id,title,short_description,synopsis,posters,year,years,object_type,genres,seasons,localizations,ivi_release_date",
+      }),
+      // Без справочника мета просто останется без жанра — карточку это не рушит
+      loadGenres().catch(() => new Map<number, string>()),
+    ]);
+    return items
+      .filter((item) => item.id !== id)
+      .map((item) => mapRecommendation(item, genres))
+      .filter((rec): rec is IviRecommendation => rec !== null)
+      .slice(0, RECOMMENDATION_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+// Общий маппер карточки рекомендации: годится и для hydra, и для поиска/каталога
+function mapRecommendation(
+  item: RecommendationItem,
+  genres: Map<number, string>,
+): IviRecommendation | null {
+  const title = item.title ?? "";
+  const poster = resizePoster(
+    imageByFormat(item.posters, "Posters-3840x2160") || firstImage(item.posters),
+  );
+  if (!poster || !title) return null;
+  const genre = recommendationGenre(item, genres);
+  // У блогерского ролика — своя мета: автор и дата выхода вместо жанра/длительности,
+  // а автора убираем из названия (в мете он идёт отдельной строкой)
+  const description = item.short_description || item.synopsis || "";
+  if (isBloggerGenre(genre)) {
+    return {
+      id: item.id,
+      title: titleWithoutAuthor(title),
+      description,
+      poster,
+      author: authorTag(title),
+      released: relativeRelease(item.ivi_release_date),
+    };
+  }
+  return {
+    id: item.id,
+    title,
+    description,
+    poster,
+    year: item.year ?? item.years?.[0],
+    genre,
+    runtime: recommendationRuntime(item),
+  };
+}
+
+/*
+  Ряд по жанру (catalogue) — например, «Биографии». Каталог принимает id жанра
+  из справочника categories/v5 и отдаёт контент этого жанра по популярности.
+*/
+async function genreRow(genreName: RegExp, excludeId?: number): Promise<IviRecommendation[]> {
+  try {
+    const genres = await loadGenres().catch(() => new Map<number, string>());
+    let genreId: number | undefined;
+    for (const [id, title] of genres) {
+      if (genreName.test(title)) {
+        genreId = id;
+        break;
+      }
+    }
+    if (!genreId) return [];
+    const items = await apiGet<RecommendationItem[]>("catalogue/v7/", {
+      genre: String(genreId),
+      sort: "pop",
+      from: "0",
+      to: "23",
+      fields:
+        "id,title,short_description,synopsis,posters,year,years,object_type,genres,seasons,localizations,ivi_release_date,duration",
+    });
+    return dedupeRow(items, genres, excludeId);
+  } catch {
+    return [];
+  }
+}
+
+// Собирает карточки, отбрасывает дубли по id и исходный тайтл, режет до лимита
+function dedupeRow(
+  items: RecommendationItem[],
+  genres: Map<number, string>,
+  excludeId?: number,
+): IviRecommendation[] {
+  const seen = new Set<number>();
+  const row: IviRecommendation[] = [];
+  for (const item of items) {
+    if (item.id === excludeId || seen.has(item.id)) continue;
+    const card = mapRecommendation(item, genres);
+    if (!card) continue;
+    seen.add(item.id);
+    row.push(card);
+    if (row.length >= RECOMMENDATION_LIMIT) break;
+  }
+  return row;
+}
+
+// Первый жанр на карточке Иви и есть основной — его и показываем в мете
+function recommendationGenre(item: RecommendationItem, genres: Map<number, string>): string {
+  for (const genreId of item.genres ?? []) {
+    const title = genres.get(genreId);
+    if (title) return upperFirst(title);
+  }
+  return "";
+}
+
+/*
+  Длительность в мете: у фильма — время (localizations), у сериала — число
+  сезонов. object_type у hydra: "video" — фильм/ролик, "compilation" — сериал.
+*/
+function recommendationRuntime(item: RecommendationItem): string {
+  if (item.object_type === "compilation") {
+    const count = item.seasons?.length ?? 0;
+    return count ? seasonsLabel(count) : "";
+  }
+  const duration = item.localizations?.find((loc) => loc.duration)?.duration ?? item.duration;
+  return duration ? formatDuration(duration) : "";
+}
+
+// Постеры приходят вплоть до 4K: просим у CDN версию под карточку 224×126
+function resizePoster(url: string): string {
+  return url ? `${url.replace(/\/+$/, "")}/456x256/` : url;
 }
 
 function isReleased(raw: RawEpisode): boolean {
