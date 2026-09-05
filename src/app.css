@@ -377,6 +377,11 @@ input {
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.82) 0%, rgb(0, 0, 0) 55%);
 }
 
+/* Сетка серий полностью поднята — фон чуть темнее, чтобы серии читались лучше */
+.player-wrap:has(.series-layer.grid-layout.open) .scrim {
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.72) 0%, rgb(0, 0, 0) 100%);
+}
+
 .controls-layer,
 .grad-bottom {
   transition: opacity var(--duration-scrim) ease;
@@ -733,6 +738,23 @@ input {
   transition: transform var(--duration-focus) ease;
 }
 
+/* Таб сезона и его год — на одной строке, год по центру справа от пилюли */
+.season-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Год съёмок сезона: отдельная сущность, мельче и с прозрачностью 50% */
+.season-year {
+  font-size: var(--typo-kleodora-size);
+  line-height: var(--typo-kleodora-line);
+  font-weight: 500;
+  color: var(--color-sofala);
+  opacity: 0.5;
+  white-space: nowrap;
+}
+
 /* Один сезон: заголовок вместо таба — без фона, отступов чипа и клика */
 .season-heading {
   height: 40px;
@@ -744,21 +766,22 @@ input {
   color: var(--color-sofala);
 }
 
-/* SegmentControlItem из Figma 1299:10342 */
+/* SegmentControlItem из Figma «компоненты»: помельче, пилюля обтягивает название.
+   Заливка появляется только у активного (серая) и у сфокусированного (фуксия). */
 .segment-item {
-  height: 40px;
+  height: 36px;
   border: 0;
   border-radius: 12px;
-  padding: 12px;
+  padding: 7px 15px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
   overflow: hidden;
   background: transparent;
   color: var(--color-sofia);
-  font-size: var(--typo-eralato-size);
-  line-height: var(--typo-eralato-line);
+  font-size: 16px;
+  line-height: 22px;
   font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
@@ -793,6 +816,129 @@ input {
   align-items: center;
   color: var(--color-axum);
   font-size: 15px;
+}
+
+/* ===== Раскладка «сетка»: сезоны слева, серии сеткой справа, скролл вниз ===== */
+.series-layer.grid-layout {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 20px;
+  /* Шире область под серии, чтобы постеры были крупнее (меньше поля по краям) */
+  left: 48px;
+  width: 864px;
+  /* Закрытое состояние: «уши» серий видны на 24px от верхней границы постера */
+  top: 516px;
+}
+
+/* Раскрытая шторка занимает кадр от верха; горизонтальной прокрутки нет */
+.series-layer.grid-layout.open {
+  top: 40px;
+}
+
+/* Сезоны — вертикальной колонкой слева. Много сезонов не влезает — колонка
+   скроллится: верхние сезоны уходят вверх за границу (translateY задаёт компонент). */
+.grid-layout .season-tabs {
+  width: 140px;
+  flex: none;
+  height: 468px;
+  overflow: hidden;
+}
+
+.grid-layout .season-track {
+  flex-direction: column;
+  /* Пилюли обтягивают название сезона, а не тянутся во всю колонку */
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+}
+
+/* Один сезон — некликабельный заголовок слева */
+.grid-layout .season-heading {
+  height: auto;
+  padding: 6px 4px;
+  font-size: var(--typo-eralato-size);
+  line-height: var(--typo-eralato-line);
+}
+
+/* Таб сезона (Figma «компоненты»): обычный — серый текст без фона; активный
+   (просматриваемый) — серая пилюля; в фокусе — фуксия. Пилюля обтягивает текст. */
+.grid-layout .segment-item {
+  height: auto;
+  justify-content: flex-start;
+  padding: 7px 16px;
+  border-radius: 12px;
+  font-size: 16px;
+  line-height: 22px;
+  font-weight: 600;
+  background: transparent;
+  color: var(--color-axum);
+}
+
+/* Активный сезон — серая заливка */
+.grid-layout .segment-item.selected {
+  background: var(--color-segment-selected);
+  color: var(--color-sofala);
+}
+
+/* В фокусе — яркая фуксия (правило ниже — приоритет над активным) */
+.grid-layout .segment-item.focused {
+  background: var(--color-madrid);
+  color: var(--color-sofala);
+}
+
+/* Серии — сетка N колонок, вертикальный скролл делает translateY по ряду.
+   overflow: visible — ряды, уходящие вверх при скролле, не режутся здесь, а
+   уходят за верхнюю границу экрана (клипает сам плеер, overflow: hidden), и
+   обводка активного постера не обрезается. Высота = видимая область (top 40 →
+   низ кадра 540). */
+.grid-layout .rail-viewport {
+  flex: 1;
+  min-width: 0;
+  /* 40 (верх блока) + 468 = 508 — последний ряд не прилипает к низу, 32px зазор */
+  height: 468px;
+  overflow: visible;
+}
+
+.grid-layout .rail.grid {
+  display: grid;
+  grid-template-columns: repeat(var(--grid-cols, 4), minmax(0, 1fr));
+  column-gap: var(--poster-gap);
+  row-gap: 24px;
+  width: 100%;
+  height: auto;
+  transition: transform var(--duration-focus) ease;
+}
+
+/* В сетке карточка и постер тянутся по ширине колонки (16:9) */
+.grid-layout .episode-card {
+  width: 100%;
+  position: relative;
+}
+
+.grid-layout .poster {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+}
+
+/*
+  Обводка фокуса в сетке — через box-shadow, а не outline: постер тут дробной
+  высоты (aspect-ratio), и outline-offset рендерится неровно (наезжает сверху и
+  справа). box-shadow следует за скруглённым боксом постера ровным кольцом с
+  зазором (первый слой — тёмный зазор под цвет подложки, второй — белое кольцо).
+*/
+.grid-layout .episode-card.focused .poster {
+  outline: var(--poster-focus-ring) solid var(--color-sofala);
+  outline-offset: var(--poster-focus-offset);
+  box-shadow: none;
+}
+
+/* Платный контент в «Вертикальном»: у закрытой серии в фокусе то же кольцо, что
+   и обычно, но оранжевого цвета (без отдельной градиентной рамки) */
+.player-wrap[data-paid="true"] .grid-layout .episode-card.locked.focused .poster {
+  outline: var(--poster-focus-ring) solid var(--color-paid);
+  outline-offset: var(--poster-focus-offset);
+  box-shadow: none;
 }
 
 /* Button_STB «Уведомлять»: Default прозрачный, выбранный jaffa, фокус madrid */
@@ -937,7 +1083,9 @@ input {
   background: #222;
 }
 
-.poster img {
+/* Только сам кадр серии тянем на весь постер; иконки в оверлеях (глаз, колокольчик,
+   замок) — прямыми детьми не являются и сохраняют свой размер и пропорции */
+.poster > img {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -964,10 +1112,13 @@ input {
   opacity: 0.5;
 }
 
-/* Episode / CoomingSoon: подпись даты — Ctrl/15|20 M поверх затемнённого кадра */
+/* Episode / CoomingSoon: подпись даты — Ctrl/15|20 M поверх затемнённого кадра.
+   z-index: 2 — иконки и подписи над затемнением .poster::after, поэтому всегда
+   белые (плей текущей серии, глаз, «Раскрыть» и т.д.), а не приглушены им */
 .availability-overlay {
   position: absolute;
   inset: 0;
+  z-index: 2;
   display: grid;
   place-items: center;
   font-family: var(--font-ivi);
@@ -1019,9 +1170,125 @@ input {
 }
 
 .notify-overlay .notify-bell {
-  width: 16px;
-  height: 16px;
+  /* Пропорции колокольчика 14.4×16 — не квадратим, иначе режется сверху/снизу */
+  width: 15px;
+  height: 17px;
+  object-fit: contain;
   opacity: 1;
+}
+
+/* Вне фокуса у невышедшей серии — только иконка часов «скоро» */
+.notify-overlay .notify-clock {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  opacity: 1;
+}
+
+/* Просмотренная и начатая серия: постер затемнён, по центру глазик.
+   У просмотренных затемнение чуть сильнее */
+.episode-card.watched .poster::after,
+.episode-card.started .poster::after {
+  opacity: 0.62;
+}
+
+.watched-overlay {
+  transition: opacity var(--duration-focus) ease;
+}
+
+/* «Просмотрено»/«Начато» — тем же серым, что и заголовок неактивной серии */
+.episode-card small.seen-label {
+  color: var(--color-axum);
+}
+
+/* Начатая серия в фокусе: затемнение постера остаётся (как у просмотренной),
+   уходит только глазик */
+.episode-card.started.focused .watched-overlay {
+  opacity: 0;
+}
+
+/* Финал сезона (невышедшая последняя серия): иконка и подпись «Финал»
+   по центру постера, друг под другом */
+.finale-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.finale-overlay .finale-icon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
+.finale-overlay .finale-caption {
+  font-size: var(--typo-kleodora-size);
+  line-height: var(--typo-kleodora-line);
+  font-weight: 500;
+  color: var(--color-sofala);
+}
+
+/* Схлопнутая пачка просмотренных: вложенность — основной постер (последняя
+   серия) + сзади второй постер того же цвета, выглядывающий сверху */
+.episode-card.collapsed-card .poster {
+  background: var(--color-varna);
+  position: relative;
+  z-index: 1;
+}
+
+/* Основной постер схлопнутой пачки затемнён на 80% */
+.episode-card.collapsed-card .poster::after {
+  opacity: 0.8;
+}
+
+/* В фокусе задняя вложенность (второй постер) исчезает */
+.episode-card.collapsed-card.focused .collapse-stack {
+  opacity: 0;
+}
+
+/* Второй постер сзади — белая заливка 20%, чуть уже и выше основного */
+.collapse-stack {
+  position: absolute;
+  top: -8px;
+  left: 12px;
+  right: 12px;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--poster-radius);
+  background: rgba(255, 255, 255, 0.2);
+  z-index: 0;
+}
+
+.collapse-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.collapse-overlay .collapse-icon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
+.collapse-overlay .collapse-caption {
+  font-size: var(--typo-kleodora-size);
+  line-height: var(--typo-kleodora-line);
+  font-weight: 500;
+  color: var(--color-sofala);
+}
+
+.watched-overlay .watched-eye {
+  /* Пропорции глаза 20×15 — не квадратим, иначе режется по бокам */
+  width: 24px;
+  height: 18px;
+  object-fit: contain;
+  opacity: 1;
+  /* Глаз всегда серый: иконка белая, brightness 0.56 → #8f8f8f */
+  filter: brightness(0.56);
 }
 
 /* Дата выхода невышедшей серии — снизу и зелёная (Figma 318:14892) */
@@ -1066,6 +1333,35 @@ input {
   color: var(--color-axum);
 }
 
+/* Название серии: иконка «в эфире» слева, дальше — область с бегущей строкой */
+.episode-card p.episode-line {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+/* Окно, в котором едет название: за его край текст не вылезает */
+.ep-title-clip {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* Текст всегда inline-block — надёжно меряется и едет через translateX */
+.ep-title-text {
+  display: inline-block;
+  white-space: nowrap;
+  will-change: transform;
+}
+
+/* Вне фокуса длинное название обрезано — растушёвываем правый край, намекая,
+   что текст продолжается (в фокусе он поедет бегущей строкой) */
+.ep-title-clip.clipped {
+  -webkit-mask-image: linear-gradient(90deg, #000 78%, transparent 100%);
+  mask-image: linear-gradient(90deg, #000 78%, transparent 100%);
+}
+
 .episode-card small {
   display: block;
   margin-top: 4px;
@@ -1085,13 +1381,21 @@ input {
   color: var(--color-sofala);
 }
 
-/* Иконка «в эфире сейчас» перед номером текущей серии */
-.episode-card .onair-icon {
-  width: 12px;
-  height: 12px;
-  margin-right: 4px;
-  vertical-align: -1px;
-  flex: none;
+/* Серия «в эфире»: контур плея по центру постера, остаётся и в фокусе */
+.onair-overlay {
+  transition: opacity var(--duration-focus) ease;
+}
+
+/* Активная серия: постер затемнён под плей-иконкой — и вне фокуса, и в фокусе */
+.episode-card.current .poster::after {
+  opacity: 0.4;
+}
+
+.onair-overlay .onair-poster-icon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  opacity: 1;
 }
 
 /* ===== Вариант «С рекомом» ===== */
@@ -1247,38 +1551,10 @@ input {
   position: relative;
 }
 
-/* Градиентная рамка заменяет белую обводку только у серии под замком */
+/* У серии под замком в фокусе — та же обводка, что обычно, только оранжевого
+   цвета (отдельной градиентной рамки больше нет) */
 .player-wrap[data-variant="recom"][data-paid="true"] .episode-card.locked.focused .poster {
-  outline: none;
-}
-
-/* Та же геометрия, что у обводки фокуса (2px линия, отступ 4px, радиус постера),
-   но градиент FD5801 → D5BD01 из левого нижнего угла в правый верхний, со
-   свечением. Кольцо рисуем маской по краю псевдоэлемента, вынесенного за постер
-   (у .poster overflow: hidden, внутри его не показать). */
-.player-wrap[data-variant="recom"][data-paid="true"] .episode-card.locked.focused::before {
-  content: "";
-  position: absolute;
-  /* box-sizing нужно задать явно: глобальное * на псевдоэлементы не действует,
-     иначе padding уходит наружу и правый/нижний отступы становятся больше */
-  box-sizing: border-box;
-  left: -6px;
-  top: -6px;
-  width: calc(var(--poster-w) + 12px);
-  height: calc(var(--poster-h) + 12px);
-  border-radius: calc(var(--poster-radius) + 6px);
-  padding: 2px;
-  background: linear-gradient(to top right, #fd5801, #d5bd01);
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  filter:
-    drop-shadow(0 0 4px rgba(253, 88, 1, 0.55))
-    drop-shadow(0 0 12px rgba(213, 189, 1, 0.3));
-  pointer-events: none;
-  z-index: 2;
+  outline-color: var(--color-paid);
 }
 
 /* Шильд «По подписке» перед длительностью в подписи карточки в фокусе:

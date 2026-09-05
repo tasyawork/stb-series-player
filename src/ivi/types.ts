@@ -23,6 +23,8 @@ export type IviSeason = {
   number: number;
   title: string;
   episodeCount: number;
+  // Год съёмок сезона: показываем справа от таба, если сезонов 5+
+  year?: number;
 };
 
 // Похожий по жанру тайтл для галереи «Смотрят вместе с …»

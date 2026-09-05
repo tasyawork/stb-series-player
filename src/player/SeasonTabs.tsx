@@ -4,15 +4,18 @@ import { memo, useLayoutEffect, useRef, useState } from "react";
 const PEEK = 48;
 
 type SeasonTabsProps = {
-  seasons: { number: number; title: string; episodeCount: number }[];
+  seasons: { number: number; title: string; episodeCount: number; year?: number }[];
   activeSeason: number;
   focusedSeason: number | null;
+  /* Вертикальная колонка (сетка): скролл идёт по вертикали (translateY) */
+  vertical?: boolean;
 };
 
 export const SeasonTabs = memo(function SeasonTabs({
   seasons,
   activeSeason,
   focusedSeason,
+  vertical = false,
 }: SeasonTabsProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const trackRef = useRef<HTMLDivElement | null>(null);
@@ -22,21 +25,28 @@ export const SeasonTabs = memo(function SeasonTabs({
     const viewport = viewportRef.current;
     const track = trackRef.current;
     if (!viewport || !track) return;
-    const tab = track.querySelector<HTMLElement>(`[data-season="${activeSeason}"]`);
+    // Скроллим к сфокусированному сезону (а вне фокуса — к активному)
+    const target = focusedSeason ?? activeSeason;
+    const tab = track.querySelector<HTMLElement>(`[data-season="${target}"]`);
     if (!tab) return;
 
-    const viewportWidth = viewport.clientWidth;
-    const maxOffset = Math.max(0, track.scrollWidth - viewportWidth);
-    const left = tab.offsetLeft;
-    const right = left + tab.offsetWidth;
+    // По вертикали (сетка) считаем по высоте, по горизонтали — по ширине
+    const size = vertical ? viewport.clientHeight : viewport.clientWidth;
+    const scroll = vertical ? track.scrollHeight : track.scrollWidth;
+    const maxOffset = Math.max(0, scroll - size);
+    const start = vertical ? tab.offsetTop : tab.offsetLeft;
+    const end = start + (vertical ? tab.offsetHeight : tab.offsetWidth);
 
     setOffset((current) => {
       let next = current;
-      if (right + PEEK > current + viewportWidth) next = right + PEEK - viewportWidth;
-      else if (left - PEEK < current) next = left - PEEK;
+      if (end + PEEK > current + size) next = end + PEEK - size;
+      else if (start - PEEK < current) next = start - PEEK;
       return Math.max(0, Math.min(next, maxOffset));
     });
-  }, [activeSeason, seasons]);
+  }, [activeSeason, focusedSeason, seasons, vertical]);
+
+  // Год рядом с табом показываем только у длинных сериалов (5 сезонов и больше)
+  const showYears = seasons.length >= 5;
 
   if (seasons.length === 0) return null;
   // Один сезон — не таб, а простой некликабельный заголовок
@@ -54,22 +64,27 @@ export const SeasonTabs = memo(function SeasonTabs({
         ref={trackRef}
         role="tablist"
         aria-label="Сезоны"
-        style={{ transform: `translateX(${-offset}px)` }}
+        style={{ transform: vertical ? `translateY(${-offset}px)` : `translateX(${-offset}px)` }}
       >
         {seasons.map((season) => {
           const selected = season.number === activeSeason;
           const focused = season.number === focusedSeason;
           const state = focused ? "Focused" : selected ? "Selected" : "Default";
           return (
-            <div
-              key={season.number}
-              className={`segment-item${selected ? " selected" : ""}${focused ? " focused" : ""}`}
-              data-season={season.number}
-              data-state={state}
-              role="tab"
-              aria-selected={selected}
-            >
-              {season.number} сезон
+            <div className="season-row" key={season.number}>
+              <div
+                className={`segment-item${selected ? " selected" : ""}${focused ? " focused" : ""}`}
+                data-season={season.number}
+                data-state={state}
+                role="tab"
+                aria-selected={selected}
+              >
+                {season.number} сезон
+              </div>
+              {/* Год съёмок — отдельной сущностью справа, только у длинных сериалов (5+ сезонов) */}
+              {showYears && season.year ? (
+                <span className="season-year">{season.year}</span>
+              ) : null}
             </div>
           );
         })}

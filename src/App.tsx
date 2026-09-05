@@ -23,7 +23,7 @@ const EXAMPLES = [
   { label: "Платный", q: "https://www.ivi.ru/watch/dva-holma" },
 ];
 
-type Mode = "plain" | "recom";
+type Mode = "plain" | "recom" | "vertical";
 // Правый переключатель: сериал (текущий прототип) или фильм (две галереи)
 type Content = "series" | "film";
 
@@ -170,6 +170,15 @@ export function App() {
               onClick={() => setMode("recom")}
             >
               С рекомом
+            </button>
+            {/* Пока ведёт себя как «Без рекома» (plain); правки будут позже */}
+            <button
+              type="button"
+              className={`mode-btn${mode === "vertical" ? " active" : ""}`}
+              aria-pressed={mode === "vertical"}
+              onClick={() => setMode("vertical")}
+            >
+              Вертикальный
             </button>
           </div>
         ) : null}

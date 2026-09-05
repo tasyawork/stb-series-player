@@ -47,7 +47,8 @@ type PanelOption = { kind: "quality" | "audio" | "subtitle"; value: string };
 
 // Вариант прототипа: "plain" — базовый, "recom" — с рекомендациями.
 // Пока оба ведут себя одинаково; крючок для будущих правок второго варианта.
-type PlayerVariant = "plain" | "recom";
+// "vertical" пока ведёт себя как plain — ветки редизайна завязаны на "recom"
+type PlayerVariant = "plain" | "recom" | "vertical";
 
 // Тип контента: сериал (серии с табами сезонов) или фильм (две галереи)
 type PlayerContent = "series" | "film";
@@ -66,9 +67,45 @@ function PlayerScreenView({
   content = "series",
 }: PlayerScreenProps) {
   const [activeSeason, setActiveSeason] = useState(series.loadedSeason);
+  /*
+    Демо-«история просмотра»:
+    — «Холод»: первые 5 серий просмотрены, 6-я начата, «в эфире» седьмая (её
+      таймлайн стоит на середине, будто досмотрели до половины);
+    — «Дар» (много серий): первые 20 серий просмотрены полностью, а сейчас идёт
+      21-я — при заходе в серии фокус сразу на ней, а просмотренные уходят вверх.
+  */
+  const demoWatchedCount =
+    series.slug === "holod" ? 5 : series.slug === "dar" ? 20 : 0;
+  const demoWatchedIds = demoWatchedCount
+    ? series.episodes
+        .filter((item) => item.availability === "available")
+        .slice(0, demoWatchedCount)
+        .map((item) => item.id)
+    : [];
+  const demoWatched = new Set(demoWatchedIds);
+  /*
+    Демо: шестую вышедшую серию «Холода» показываем начатой, но недосмотренной —
+    у неё глазик, «Начато» и неполный таймлайн (сразу после просмотренных 1-5).
+  */
+  const demoStartedIds =
+    series.slug === "holod"
+      ? series.episodes
+          .filter((item) => item.availability === "available")
+          .slice(5, 6)
+          .map((item) => item.id)
+      : [];
+  const demoStarted = new Set(demoStartedIds);
   // Открываем сезон на серии, которую действительно можно смотреть: под замком
-  // играть нечего, поэтому запертая серия годится только как последний вариант
+  // играть нечего, просмотренные и начатую пропускаем — стартуем на седьмой (в эфире)
   const firstEpisode =
+    series.episodes.find(
+      (item) =>
+        item.season === series.loadedSeason &&
+        item.availability === "available" &&
+        !item.isLocked &&
+        !demoWatched.has(item.id) &&
+        !demoStarted.has(item.id),
+    ) ??
     series.episodes.find(
       (item) =>
         item.season === series.loadedSeason && item.availability === "available" && !item.isLocked,
@@ -77,10 +114,14 @@ function PlayerScreenView({
       (item) => item.season === series.loadedSeason && item.availability === "available",
     ) ??
     series.episodes[0];
+  // Демо: у «Холода» текущую (седьмую) серию открываем на середине таймлайна
+  const demoHalfWatchedId = series.slug === "holod" ? firstEpisode?.id : undefined;
   const [episodeId, setEpisodeId] = useState(firstEpisode?.id ?? 0);
   const [playing, setPlaying] = useState(true);
   const [focus, setFocus] = useState<Focus>("pause");
   const [railIndex, setRailIndex] = useState(0);
+  // Раскрыта ли схлопнутая пачка просмотренных серий (сетка, 12+ серий)
+  const [expandedWatched, setExpandedWatched] = useState(false);
   // Фокус во второй галерее «От того же режиссёра» (только вариант recom)
   const [recomIndex, setRecomIndex] = useState(0);
   const [panel, setPanel] = useState<"quality" | "audio" | null>(null);
@@ -105,6 +146,12 @@ function PlayerScreenView({
   const railRepeatRef = useRef<{ dir: number; count: number }>({ dir: 0, count: 0 });
   // Напоминания о выходе невышедших (бесплатных) серий — по id серии
   const [episodeReminders, setEpisodeReminders] = useState<Set<number>>(() => new Set());
+  // Полностью просмотренные серии (демо-набор «Холода»): «Просмотрено» + полный таймлайн
+  const [watchedEpisodes] = useState<Set<number>>(() => new Set(demoWatchedIds));
+  // Начатые, но недосмотренные: те, что открывали в этом сеансе, плюс демо-набор
+  const [startedEpisodes, setStartedEpisodes] = useState<Set<number>>(
+    () => new Set(demoStartedIds),
+  );
   // Последняя замеченная позиция и факт того, что кадры уже реально ехали:
   // по ним отличаем идущее воспроизведение от замершего первого кадра
   const playbackTimeRef = useRef<number | null>(null);
@@ -195,6 +242,30 @@ function PlayerScreenView({
   // Ряд серий всегда 152 (как в «Без рекома»), галереи рекомендаций — 224
   const EPISODE_CARD_W = 152;
   const RECOM_CARD_W = 224;
+  // Новая раскладка серий/сезонов: сезоны слева, серии сеткой справа, скролл вниз.
+  // Только вариант «Вертикальный»; «Без рекома», recom и фильм — прежняя раскладка.
+  const gridLayout = content === "series" && variant === "vertical";
+  const GRID_COLUMNS = 4;
+  /*
+    Схлопывание просмотренных: если сезон открывается длинной (12+) непрерывной
+    чередой полностью просмотренных серий в начале, сворачиваем их в одну карточку
+    «Раскрыть». Только в вертикальной сетке (Figma Daily). Начатые серии в череду
+    не входят. railCount — число ячеек ряда с учётом свёртки; функции ниже
+    переводят между индексом ячейки ряда (railIndex) и индексом реальной серии.
+  */
+  const COLLAPSE_MIN = 12;
+  let leadingWatched = 0;
+  if (gridLayout) {
+    for (const item of seasonEpisodes) {
+      if (item.availability === "available" && watchedEpisodes.has(item.id)) leadingWatched += 1;
+      else break;
+    }
+  }
+  const collapseCount = !expandedWatched && leadingWatched >= COLLAPSE_MIN ? leadingWatched : 0;
+  const railCount =
+    collapseCount > 0 ? seasonEpisodes.length - collapseCount + 1 : seasonEpisodes.length;
+  // Подпись схлопнутой карточки: «N серий» + «Просмотрено»
+  const collapseLabel = collapseCount > 0 ? episodesCountLabel(collapseCount) : "";
   /*
     Две галереи фильма: берём готовые именованные подборки (series.galleries),
     а если их нет — откатываемся на общий ряд рекомендаций (вторую полку
@@ -213,7 +284,7 @@ function PlayerScreenView({
   // Платный тайтл в recom: у постера в фокусе градиентная рамка вместо белой
   // обводки и шильд «По подписке» в подписи. Триггер — подписочный контент
   // (SVOD/платные сезоны); тариф (Старт, Медиатека…) роли не играет.
-  const paidBadge = isRecom && series.subscriptionRequired;
+  const paidBadge = (isRecom || variant === "vertical") && series.subscriptionRequired;
 
   const qualityOptions = useMemo(
     () => ["Авто", ...series.capabilities.qualities.filter((item) => item !== "Авто")],
@@ -311,7 +382,11 @@ function PlayerScreenView({
   }, [markVideoReady]);
 
   useEffect(() => {
-    playhead.set(0);
+    // Демо: седьмую серию «Холода» открываем на середине таймлайна, будто её
+    // досмотрели до половины; остальные серии стартуют с нуля. Условие
+    // идемпотентно (одинаково при повторном прогоне эффекта в StrictMode).
+    const seedHalf = episodeId === demoHalfWatchedId && (episode?.durationSec ?? 0) > 0;
+    playhead.set(seedHalf ? (episode?.durationSec ?? 0) / 2 : 0);
     setPlaying(true);
     // Ждать нечего, когда видео и нет: серия без источника сразу «готова»
     applyVideoStage(src ? "loading" : "ready");
@@ -322,7 +397,16 @@ function PlayerScreenView({
     playbackStartedRef.current = false;
     gaveUpRef.current = false;
     if (videoRef.current) videoRef.current.currentTime = 0;
-  }, [applyBuffering, applyVideoStage, clearBufferTimer, episodeId, playhead, src]);
+  }, [
+    applyBuffering,
+    applyVideoStage,
+    clearBufferTimer,
+    demoHalfWatchedId,
+    episode?.durationSec,
+    episodeId,
+    playhead,
+    src,
+  ]);
 
   useEffect(
     () => () => {
@@ -331,6 +415,12 @@ function PlayerScreenView({
     },
     [clearBufferTimer],
   );
+
+  // Открытая серия считается начатой: помечаем её id, чтобы дальше показать
+  // затемнение, глазик и «Начато» (если её не досмотрели полностью)
+  useEffect(() => {
+    setStartedEpisodes((seen) => (seen.has(episodeId) ? seen : new Set(seen).add(episodeId)));
+  }, [episodeId]);
 
   // Кадры так и не поехали: дальше крутить спиннер бессмысленно
   useEffect(() => {
@@ -409,11 +499,18 @@ function PlayerScreenView({
     return () => window.clearTimeout(timer);
   }, [activity, browsing]);
 
+  // Вышли из шторки в плеер — просмотренные снова показываем свёрнутыми при заходе
+  useEffect(() => {
+    if (!browsing) setExpandedWatched(false);
+  }, [browsing]);
+
   const selectSeason = useCallback(
     (season: number) => {
       setActiveSeason(season);
       setRailIndex(0);
       setRecomIndex(0);
+      // Новый сезон — своя череда просмотренных: пачку снова показываем свёрнутой
+      setExpandedWatched(false);
     },
     [],
   );
@@ -473,7 +570,15 @@ function PlayerScreenView({
       if (id === "episodes") {
         // В фильме галерея — рекомендации-заглушки, выбирать в ней нечего
         if (isFilm) return;
-        const chosen = seasonEpisodes[railIndex];
+        // Ряд может начинаться со схлопнутой карточки просмотренных: ОК по ней —
+        // раскрыть пачку и встать на ПОСЛЕДНЮЮ просмотренную серию
+        if (collapseCount > 0 && railIndex === 0) {
+          setExpandedWatched(true);
+          setRailIndex(collapseCount - 1);
+          return;
+        }
+        const realIndex = collapseCount > 0 ? collapseCount + railIndex - 1 : railIndex;
+        const chosen = seasonEpisodes[realIndex];
         if (chosen?.isLocked) {
           showToast("Оформите подписку, чтобы смотреть эту серию");
         } else if (chosen?.availability === "available") {
@@ -509,6 +614,7 @@ function PlayerScreenView({
     },
     [
       audio,
+      collapseCount,
       episodeReminders,
       goRelative,
       hasPrev,
@@ -548,7 +654,14 @@ function PlayerScreenView({
     function focusEpisodesIn(season: number) {
       const episodes = episodesBySeason[season] ?? [];
       const index = episodes.findIndex((item) => item.id === episode?.id);
-      const targetIndex = index >= 0 ? index : 0;
+      const realIndex = index >= 0 ? index : 0;
+      // Свёртка просмотренных считается для активного сезона: карту применяем только к нему
+      const useCollapse = collapseCount > 0 && season === activeSeason;
+      const targetIndex = useCollapse
+        ? realIndex < collapseCount
+          ? 0
+          : realIndex - collapseCount + 1
+        : realIndex;
       browseOriginRef.current = { season, index: targetIndex };
       setActiveSeason(season);
       setRailIndex(targetIndex);
@@ -621,6 +734,18 @@ function PlayerScreenView({
           return;
         }
         if (focus === "episodes") {
+          if (gridLayout) {
+            // Сетка: вправо — следующая карточка; влево из левого столбца — к сезонам
+            const total = railCount;
+            if (step > 0) {
+              setRailIndex((value) => Math.min(total - 1, value + 1));
+            } else if (railIndex % GRID_COLUMNS === 0) {
+              if (!singleSeason) setFocus("seasons");
+            } else {
+              setRailIndex((value) => Math.max(0, value - 1));
+            }
+            return;
+          }
           if (isFilm) {
             // В фильме верхняя галерея — карточки подборки, без закольцовки/разгона
             const last = filmTopItems.length - 1;
@@ -656,6 +781,11 @@ function PlayerScreenView({
           return;
         }
         if (focus === "seasons") {
+          if (gridLayout) {
+            // Сезоны вертикально: вправо — в сетку серий; влево — никуда
+            if (step > 0) setFocus("episodes");
+            return;
+          }
           const index = series.seasons.findIndex((s) => s.number === activeSeason);
           const next = series.seasons[index + step];
           if (next) selectSeason(next.number);
@@ -668,6 +798,28 @@ function PlayerScreenView({
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
         if (event.key === "ArrowDown") {
+          if (gridLayout && focus === "episodes") {
+            // Сетка: вниз — на ряд ниже. Если прямой ячейки снизу нет из-за
+            // неполного последнего ряда (2-3 постера), переходим на его первый постер.
+            const total = railCount;
+            setRailIndex((value) => {
+              const below = value + GRID_COLUMNS;
+              const lastRowStart = Math.floor((total - 1) / GRID_COLUMNS) * GRID_COLUMNS;
+              const lastRowPartial = total - lastRowStart < GRID_COLUMNS;
+              // Из ряда прямо над неполным последним рядом — на его первый постер
+              if (lastRowPartial && value < lastRowStart && below >= lastRowStart) {
+                return lastRowStart;
+              }
+              return below < total ? below : value;
+            });
+            return;
+          }
+          if (gridLayout && focus === "seasons") {
+            const index = series.seasons.findIndex((s) => s.number === activeSeason);
+            const next = series.seasons[index + 1];
+            if (next) selectSeason(next.number);
+            return;
+          }
           if (focus === "back") {
             setFocus("pause");
           } else if (focusRow === CONTROLS_ROW) {
@@ -687,6 +839,20 @@ function PlayerScreenView({
           return;
         }
 
+        if (gridLayout && focus === "episodes") {
+          // Сетка: вверх — на ряд выше; из верхнего ряда — на таймлайн
+          if (railIndex >= GRID_COLUMNS) setRailIndex((value) => value - GRID_COLUMNS);
+          else setFocus("seek");
+          return;
+        }
+        if (gridLayout && focus === "seasons") {
+          const index = series.seasons.findIndex((s) => s.number === activeSeason);
+          const prev = series.seasons[index - 1];
+          // С первого сезона вверх — возврат в плеер (на таймлайн), а не тупик
+          if (prev) selectSeason(prev.number);
+          else setFocus("seek");
+          return;
+        }
         if (focus === "notify" || focus === "subscription" || focus === "recom") {
           setFocus("episodes");
         } else if (focus === "episodes") {
@@ -707,6 +873,7 @@ function PlayerScreenView({
     activeSeason,
     applyPanelOption,
     browsing,
+    collapseCount,
     controlsVisible,
     duration,
     episode?.id,
@@ -716,8 +883,11 @@ function PlayerScreenView({
     filmTopItems.length,
     focus,
     focusRow,
+    gridLayout,
     isFilm,
     isRecom,
+    railCount,
+    railIndex,
     singleSeason,
     onExit,
     panel,
@@ -848,7 +1018,7 @@ function PlayerScreenView({
         <div
           className={`series-layer${browsing ? " open" : ""}${
             isRecom && focus === "recom" ? " raised" : ""
-          }`}
+          }${gridLayout ? " grid-layout" : ""}`}
         >
           {isFilm ? (
             /* Верхняя галерея фильма вместо ряда серий */
@@ -867,6 +1037,7 @@ function PlayerScreenView({
                 seasons={series.seasons}
                 activeSeason={activeSeason}
                 focusedSeason={focus === "seasons" ? activeSeason : null}
+                vertical={gridLayout}
               />
               <EpisodeRail
                 episodes={seasonEpisodes}
@@ -879,7 +1050,15 @@ function PlayerScreenView({
                 paid={paidBadge}
                 loop={seasonEpisodes.length > 15}
                 reminders={episodeReminders}
-                recom={isRecom}
+                recom={variant !== "plain"}
+                watched={variant === "plain" ? undefined : watchedEpisodes}
+                started={variant === "plain" ? undefined : startedEpisodes}
+                grid={gridLayout}
+                columns={GRID_COLUMNS}
+                bottomAnchor={singleSeason}
+                scrollActive={browsing}
+                collapseCount={collapseCount}
+                collapseLabel={collapseLabel}
               />
             </>
           )}
@@ -895,7 +1074,7 @@ function PlayerScreenView({
                 cardWidth={RECOM_CARD_W}
               />
             </div>
-          ) : (
+          ) : gridLayout ? null : (
             <div className="series-actions">
               {showSubscriptionOffer ? (
                 <SubscriptionButton focused={focus === "subscription"} />
@@ -973,4 +1152,13 @@ function formatReleaseDate(value: string): string {
     day: "numeric",
     month: "long",
   }).format(date);
+}
+
+// «12 серий» / «22 серии» / «21 серия» — заголовок схлопнутой пачки просмотренных
+function episodesCountLabel(count: number): string {
+  const teens = count % 100 >= 11 && count % 100 <= 14;
+  const last = count % 10;
+  if (!teens && last === 1) return `${count} серия`;
+  if (!teens && last >= 2 && last <= 4) return `${count} серии`;
+  return `${count} серий`;
 }

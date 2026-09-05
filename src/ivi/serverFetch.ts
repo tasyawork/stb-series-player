@@ -34,7 +34,7 @@ const EPISODE_PAGE_SIZE = 100;
 const MAX_EPISODE_PAGES = 20;
 const EPISODE_FIELDS = [
   "id", "thumbs", "posters", "episode", "season", "title", "fake",
-  "ivi_release_info", "localizations", "promo_images",
+  "ivi_release_info", "localizations", "promo_images", "year",
 ].join(",");
 
 type Image = {
@@ -98,6 +98,8 @@ type RawEpisode = {
   title?: string;
   episode?: number;
   season?: number;
+  // Год производства серии (когда студия выпустила), а не дата добавления на ivi
+  year?: number;
   fake?: boolean | null;
   thumbs?: Image[];
   posters?: Image[];
@@ -370,12 +372,27 @@ async function loadIviSeries(
       }),
     )
     .sort((a, b) => a.season - b.season || a.episode - b.episode);
+  /*
+    Год сезона — год производства (когда студия выпустила сериал), а не дата
+    добавления на ivi. Берём из поля year серий: у сезона это год съёмок,
+    в отличие от season_release_date (публикация на ivi). На сезон — самый
+    ранний год его серий.
+  */
+  const seasonYears = new Map<number, number>();
+  for (const raw of rawEpisodes) {
+    const number = raw.season ?? 1;
+    const year = raw.year;
+    if (typeof year !== "number" || year < 1900 || year > 2100) continue;
+    const current = seasonYears.get(number);
+    if (current === undefined || year < current) seasonYears.set(number, year);
+  }
   const seasons = [...new Set(episodes.map((episode) => episode.season))]
     .sort((a, b) => a - b)
     .map((number) => ({
       number,
       title: `Сезон ${number}`,
       episodeCount: episodes.filter((episode) => episode.season === number).length,
+      year: seasonYears.get(number),
     }));
 
   return {
