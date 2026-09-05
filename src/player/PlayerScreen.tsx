@@ -69,13 +69,13 @@ function PlayerScreenView({
   const [activeSeason, setActiveSeason] = useState(series.loadedSeason);
   /*
     Демо-«история просмотра»:
-    — «Холод»: первые 5 серий просмотрены, 6-я начата, «в эфире» седьмая (её
-      таймлайн стоит на середине, будто досмотрели до половины);
+    — «Холод»: первые 3 серии просмотрены, 4-я начата (но не досмотрена),
+      «в эфире» пятая (её таймлайн стоит на середине);
     — «Дар» (много серий): первые 20 серий просмотрены полностью, а сейчас идёт
       21-я — при заходе в серии фокус сразу на ней, а просмотренные уходят вверх.
   */
   const demoWatchedCount =
-    series.slug === "holod" ? 5 : series.slug === "dar" ? 20 : 0;
+    series.slug === "holod" ? 3 : series.slug === "dar" ? 20 : 0;
   const demoWatchedIds = demoWatchedCount
     ? series.episodes
         .filter((item) => item.availability === "available")
@@ -84,14 +84,14 @@ function PlayerScreenView({
     : [];
   const demoWatched = new Set(demoWatchedIds);
   /*
-    Демо: шестую вышедшую серию «Холода» показываем начатой, но недосмотренной —
-    у неё глазик, «Начато» и неполный таймлайн (сразу после просмотренных 1-5).
+    Демо: четвёртую вышедшую серию «Холода» показываем начатой, но недосмотренной —
+    у неё глазик, «Начато» и неполный таймлайн (сразу после просмотренных 1-3).
   */
   const demoStartedIds =
     series.slug === "holod"
       ? series.episodes
           .filter((item) => item.availability === "available")
-          .slice(5, 6)
+          .slice(3, 4)
           .map((item) => item.id)
       : [];
   const demoStarted = new Set(demoStartedIds);

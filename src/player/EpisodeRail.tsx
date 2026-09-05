@@ -337,8 +337,6 @@ export const EpisodeRail = memo(function EpisodeRail({
   // «N серий» + «Просмотрено». Занимает ячейку 0, остальные индексы сдвинуты.
   const collapse = grid && collapseCount > 0;
   const renderCollapsedCard = (focused: boolean) => {
-    // Основной постер схлопнутой пачки — кадр последней просмотренной серии
-    const cover = episodes[collapseCount - 1]?.thumb;
     return (
       <div
         key="collapsed-watched"
@@ -347,8 +345,8 @@ export const EpisodeRail = memo(function EpisodeRail({
       >
         {/* Вложенность: сзади выглядывает второй постер того же цвета */}
         <span className="collapse-stack" aria-hidden="true" />
+        {/* Обложки пока нет — постер просто тёмно-серый */}
         <div className="poster">
-          {cover ? <img src={cover} alt="" loading="lazy" /> : null}
           <div className="availability-overlay collapse-overlay">
             <img className="collapse-icon" src="/icons/show-all.svg" alt="" />
             <span className="collapse-caption">Раскрыть</span>

@@ -16,6 +16,9 @@ const DEMO_VIDEOS: Record<string, string> = {
   dar: `${PUBLIC_BASE}video/dar.mp4`,
   "selskij-detektiv-1-yablonya-razdora": `${PUBLIC_BASE}video/selskij-detektiv.mp4`,
 };
+// Демо «бесплатного» тайтла: доступен всем без подписки — все серии открыты,
+// без замков (subscriptionActive=true), демо-видео нет, играет стоп-кадр
+const FREE_DEMO_SLUGS = new Set(["kto-tut-zhulik"]);
 // Логотип и промо-строка приходят из макета: в mobileapi таких полей нет
 const DEMO_TITLE_ART: Record<string, { logo: string; caption?: string }> = {
   holod: {
@@ -339,7 +342,7 @@ async function loadIviSeries(
     у пресетов он есть, и они играют как у подписчика, а произвольная ссылка
     показывает то же, что и Иви без подписки, — открытую первую серию и замки.
   */
-  const subscriptionActive = Boolean(demoVideoUrl);
+  const subscriptionActive = Boolean(demoVideoUrl) || FREE_DEMO_SLUGS.has(slug);
   const paidSeasons = new Set(
     (card.seasons ?? [])
       .filter((season) => typeof season.number === "number" && seasonNeedsSubscription(season))

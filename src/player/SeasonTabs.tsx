@@ -45,9 +45,6 @@ export const SeasonTabs = memo(function SeasonTabs({
     });
   }, [activeSeason, focusedSeason, seasons, vertical]);
 
-  // Год рядом с табом показываем только у длинных сериалов (5 сезонов и больше)
-  const showYears = seasons.length >= 5;
-
   if (seasons.length === 0) return null;
   // Один сезон — не таб, а простой некликабельный заголовок
   if (seasons.length === 1) {
@@ -81,8 +78,8 @@ export const SeasonTabs = memo(function SeasonTabs({
               >
                 {season.number} сезон
               </div>
-              {/* Год съёмок — отдельной сущностью справа, только у длинных сериалов (5+ сезонов) */}
-              {showYears && season.year ? (
+              {/* Год справа — только в вертикальной сетке и только у сезона в фокусе */}
+              {vertical && focused && season.year ? (
                 <span className="season-year">{season.year}</span>
               ) : null}
             </div>
