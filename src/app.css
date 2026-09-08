@@ -1747,3 +1747,23 @@ input {
   height: auto;
   aspect-ratio: 16 / 9;
 }
+
+/* Первая (горизонтальная) галерея умеет уезжать вверх при переходе в сетку */
+.series-layer.film-vertical .recom-shelf:first-child {
+  transition: margin-top var(--duration-scrim) ease, opacity var(--duration-scrim) ease;
+}
+
+/* Ушли в предложку (raised): горизонтальная галерея уезжает вверх за кадр —
+   не остаётся на фоне, — а сетка поднимается на её место. */
+.series-layer.film-vertical.raised .recom-shelf:first-child {
+  margin-top: -250px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Сетка занимает экран от верха до 32px над нижней границей (540 − 32 = 508;
+   сетка стоит на y≈80 → высота окна 428). На полной прокрутке низ контента
+   упирается ровно в 508 — 32px до края экрана. */
+.series-layer.film-vertical.raised .recom-shelf:last-child .rail-viewport {
+  height: 428px;
+}
