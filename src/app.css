@@ -57,7 +57,8 @@ input {
   top: 324px;
   transform: translateY(-50%);
   right: max(-252px, calc(492px - 50vw));
-  width: 132px;
+  /* Ширина по содержимому: «Горизонтальный» длиннее — кнопки растягиваются под него */
+  width: max-content;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -70,7 +71,7 @@ input {
   top: 324px;
   transform: translateY(-50%);
   left: max(-252px, calc(492px - 50vw));
-  width: 132px;
+  width: max-content;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -379,7 +380,7 @@ input {
 
 /* Сетка серий полностью поднята — фон чуть темнее, чтобы серии читались лучше */
 .player-wrap:has(.series-layer.grid-layout.open) .scrim {
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.72) 0%, rgb(0, 0, 0) 100%);
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.85) 0%, rgb(0, 0, 0) 60%);
 }
 
 .controls-layer,
@@ -819,87 +820,7 @@ input {
   font-size: 15px;
 }
 
-/* ===== Раскладка «сетка»: сезоны слева, серии сеткой справа, скролл вниз ===== */
-.series-layer.grid-layout {
-  flex-direction: row;
-  align-items: flex-start;
-  gap: 20px;
-  /* Шире область под серии, чтобы постеры были крупнее (меньше поля по краям) */
-  left: 48px;
-  width: 864px;
-  /* Закрытое состояние: «уши» серий видны на 24px от верхней границы постера */
-  top: 516px;
-}
-
-/* Раскрытая шторка занимает кадр от верха; горизонтальной прокрутки нет */
-.series-layer.grid-layout.open {
-  top: 40px;
-}
-
-/* Сезоны — вертикальной колонкой слева. Много сезонов не влезает — колонка
-   скроллится: верхние сезоны уходят вверх за границу (translateY задаёт компонент). */
-.grid-layout .season-tabs {
-  width: 140px;
-  flex: none;
-  height: 468px;
-  overflow: hidden;
-}
-
-.grid-layout .season-track {
-  flex-direction: column;
-  /* Пилюли обтягивают название сезона, а не тянутся во всю колонку */
-  align-items: flex-start;
-  gap: 6px;
-  width: 100%;
-}
-
-/* Один сезон — некликабельный заголовок слева */
-.grid-layout .season-heading {
-  height: auto;
-  padding: 6px 4px;
-  font-size: var(--typo-eralato-size);
-  line-height: var(--typo-eralato-line);
-}
-
-/* Таб сезона (Figma «компоненты»): обычный — серый текст без фона; активный
-   (просматриваемый) — серая пилюля; в фокусе — фуксия. Пилюля обтягивает текст. */
-.grid-layout .segment-item {
-  height: auto;
-  justify-content: flex-start;
-  padding: 7px 16px;
-  border-radius: 12px;
-  font-size: 16px;
-  line-height: 22px;
-  font-weight: 600;
-  background: transparent;
-  color: var(--color-axum);
-}
-
-/* Активный сезон — серая заливка */
-.grid-layout .segment-item.selected {
-  background: var(--color-segment-selected);
-  color: var(--color-sofala);
-}
-
-/* В фокусе — яркая фуксия (правило ниже — приоритет над активным) */
-.grid-layout .segment-item.focused {
-  background: var(--color-madrid);
-  color: var(--color-sofala);
-}
-
-/* Серии — сетка N колонок, вертикальный скролл делает translateY по ряду.
-   overflow: visible — ряды, уходящие вверх при скролле, не режутся здесь, а
-   уходят за верхнюю границу экрана (клипает сам плеер, overflow: hidden), и
-   обводка активного постера не обрезается. Высота = видимая область (top 40 →
-   низ кадра 540). */
-.grid-layout .rail-viewport {
-  flex: 1;
-  min-width: 0;
-  /* 40 (верх блока) + 468 = 508 — последний ряд не прилипает к низу, 32px зазор */
-  height: 468px;
-  overflow: visible;
-}
-
+/* ===== Общее для обеих вертикальных раскладок (сетка серий) ===== */
 .grid-layout .rail.grid {
   display: grid;
   grid-template-columns: repeat(var(--grid-cols, 4), minmax(0, 1fr));
@@ -908,6 +829,127 @@ input {
   width: 100%;
   height: auto;
   transition: transform var(--duration-focus) ease;
+}
+
+/* ===== Вертикаль 1 (.grid-top): табы сверху, непрерывная лента всех сезонов ===== */
+/* Наследует колонку от .series-layer: сезоны сверху (горизонтальный ряд с
+   прокруткой вправо), серии сеткой снизу. Поля по 68px (окно 824), скролл вниз. */
+.series-layer.grid-top {
+  left: 68px;
+  width: var(--row-w);
+  gap: 16px;
+  top: 452px;
+}
+
+.series-layer.grid-top.open {
+  top: 40px;
+}
+
+/* Серии скроллятся ПОД шапкой (табы + градиент): ниже по z-index */
+.grid-top .rail-viewport {
+  width: var(--row-w);
+  height: 400px;
+  overflow: visible;
+  position: relative;
+  z-index: 1;
+}
+
+/* Шапка — табы сезонов и градиент поверх: ряды уезжают вверх за неё в темноту */
+.series-layer.grid-top::before {
+  content: "";
+  position: absolute;
+  left: -68px;
+  right: -68px;
+  top: -40px;
+  /* Затемнение под табами глубже и длиннее — серии уезжают вверх в темноту заметнее */
+  height: 176px;
+  background: linear-gradient(
+    180deg,
+    rgb(0, 0, 0) 0%,
+    rgb(0, 0, 0) 40%,
+    rgba(0, 0, 0, 0.85) 66%,
+    rgba(0, 0, 0, 0) 100%
+  );
+  pointer-events: none;
+  z-index: 5;
+  opacity: 0;
+  transition: opacity var(--duration-scrim) ease;
+}
+
+.series-layer.grid-top.open::before {
+  opacity: 1;
+}
+
+.grid-top .season-tabs {
+  position: relative;
+  z-index: 6;
+}
+
+/* Заголовок-разделитель между сезонами в непрерывной ленте */
+.grid-top .season-divider {
+  grid-column: 1 / -1;
+  margin-top: 24px;
+  font-size: var(--typo-title-size);
+  line-height: var(--typo-title-line);
+  font-weight: 700;
+  color: var(--color-sofala);
+}
+
+/* ===== Вертикаль 2 (.grid-left): табы слева колонкой, серии посезонно ===== */
+.series-layer.grid-left {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 20px;
+  left: 48px;
+  width: 864px;
+  /* Закрытая шторка: над нижней границей плеера (540) видно ровно 24px постеров */
+  top: 516px;
+}
+
+.series-layer.grid-left.open {
+  top: 40px;
+}
+
+/* Сезоны — вертикальной колонкой слева; много сезонов скроллится (translateY) */
+.grid-left .season-tabs {
+  width: 140px;
+  flex: none;
+  height: 468px;
+  overflow: hidden;
+}
+
+.grid-left .season-track {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+}
+
+.grid-left .segment-item {
+  height: auto;
+  justify-content: flex-start;
+  padding: 7px 16px;
+  font-weight: 600;
+  background: transparent;
+  color: var(--color-axum);
+}
+
+.grid-left .segment-item.selected {
+  background: var(--color-segment-selected);
+  color: var(--color-sofala);
+}
+
+.grid-left .segment-item.focused {
+  background: var(--color-madrid);
+  color: var(--color-sofala);
+}
+
+/* Серии — сетка справа, занимает оставшуюся ширину; вертикальный скролл */
+.grid-left .rail-viewport {
+  flex: 1;
+  min-width: 0;
+  height: 468px;
+  overflow: visible;
 }
 
 /* В сетке карточка и постер тянутся по ширине колонки (16:9) */
@@ -934,13 +976,8 @@ input {
   box-shadow: none;
 }
 
-/* Платный контент в «Вертикальном»: у закрытой серии в фокусе то же кольцо, что
-   и обычно, но оранжевого цвета (без отдельной градиентной рамки) */
-.player-wrap[data-paid="true"] .grid-layout .episode-card.locked.focused .poster {
-  outline: var(--poster-focus-ring) solid var(--color-paid);
-  outline-offset: var(--poster-focus-offset);
-  box-shadow: none;
-}
+/* Платный контент: у закрытой серии в фокусе пока оставляем обычную белую обводку
+   (как у остальных карточек) — градиентную рамку вернём позже. */
 
 /* Button_STB «Уведомлять»: Default прозрачный, выбранный jaffa, фокус madrid */
 .series-actions {
@@ -1091,6 +1128,9 @@ input {
   height: 100%;
   object-fit: cover;
   display: block;
+  /* Скругление на самой картинке: постер может быть overflow:visible (градиентная
+     рамка платного в фокусе), а углы кадра всё равно скруглены */
+  border-radius: inherit;
 }
 
 /* Свёрнутый ряд не гасим прозрачностью — затемняем сами постеры */
@@ -1277,6 +1317,16 @@ input {
   color: var(--color-sofala);
 }
 
+/* Карточка подписки перед первой серией платного тайтла: тёмный постер с
+   замком по центру, в мете — название подписки и цена */
+.episode-card.sub-card .poster.sub-poster {
+  background: var(--color-varna);
+}
+
+.episode-card.sub-card small.sub-price {
+  color: var(--color-sofala);
+}
+
 .watched-overlay .watched-eye {
   /* Пропорции глаза 20×15 — не квадратим, иначе режется по бокам */
   width: 24px;
@@ -1344,11 +1394,28 @@ input {
   white-space: nowrap;
 }
 
+/* Дорожка бегущей строки: две копии названия в ряд, едут вместе */
+.ep-title-track {
+  display: inline-flex;
+  white-space: nowrap;
+  will-change: transform;
+}
+
 /* Текст всегда inline-block — надёжно меряется и едет через translateX */
 .ep-title-text {
   display: inline-block;
   white-space: nowrap;
-  will-change: transform;
+}
+
+/* Вторая копия названия видна только в бегущей строке — для бесшовного цикла.
+   Отступ обязан совпадать с MARQUEE_GAP в EpisodeRail.tsx (сейчас 24px). */
+.ep-title-dup {
+  margin-left: 24px;
+  visibility: hidden;
+}
+
+.ep-title-clip.marquee .ep-title-dup {
+  visibility: visible;
 }
 
 /* Вне фокуса длинное название обрезано — растушёвываем правый край, намекая,
@@ -1547,40 +1614,19 @@ input {
   position: relative;
 }
 
-/* У серии под замком в фокусе — та же обводка, что обычно, только оранжевого
-   цвета (отдельной градиентной рамки больше нет) */
-.player-wrap[data-variant="recom"][data-paid="true"] .episode-card.locked.focused .poster {
-  outline-color: var(--color-paid);
-}
+/* Градиентная рамка платного контента в recom задаётся общим правилом выше
+   (.player-wrap[data-paid="true"] .episode-card.locked.focused .poster) */
 
 /* Шильд «По подписке» перед длительностью в подписи карточки в фокусе:
    шильд и длительность идут в одну строку под номером серии */
-.episode-card .paid-shield {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  vertical-align: middle;
-  margin-top: 4px;
-  margin-right: 6px;
-}
-
-.episode-card .paid-shield-icon {
-  width: 16px;
-  height: 16px;
+.episode-card small.paid-shield-text {
   display: block;
-  flex: none;
-}
-
-.episode-card .paid-shield-text {
+  margin-top: 4px;
   font-size: var(--typo-kleodora-size);
   line-height: var(--typo-kleodora-line);
   font-weight: 500;
   white-space: nowrap;
-  background: linear-gradient(to top right, #fd5801, #d5bd01);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  -webkit-text-fill-color: transparent;
+  color: var(--color-sofala);
 }
 
 .episode-card small.episode-paid-duration {
@@ -1649,3 +1695,55 @@ input {
   font-size: 13px;
 }
 
+
+/* Мета-строка серии с шильдом «смотрят N»: шильд слева, тайминг следом */
+.episode-card small.meta-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Шильд «смотрят 50K»: иконка «глаз» + счётчик зрителей, синим (демо: 7 серия) */
+.watch-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #3ba1ff;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.watch-badge-icon {
+  width: 18px;
+  height: 12px;
+  object-fit: contain;
+}
+
+/* ---- Фильм «Вертикаль»: первая галерея как есть, вторая — сетка со скроллом вниз ---- */
+/* Вторую полку (:last-child) раскладываем сеткой 4×N: поля по бокам от .rail-viewport
+   (ширина row-w = 824 при left 68 → по 68px с каждой стороны), между постерами 16px,
+   постер тянется по колонке, сохраняя 16:9. */
+.series-layer.film-vertical .recom-shelf:last-child .rail-viewport {
+  height: 300px;
+  overflow: visible;
+}
+
+.series-layer.film-vertical .recom-shelf:last-child .rail.grid {
+  display: grid;
+  grid-template-columns: repeat(var(--grid-cols, 4), minmax(0, 1fr));
+  column-gap: 16px;
+  row-gap: 24px;
+  width: 100%;
+  height: auto;
+  transition: transform var(--duration-focus) ease;
+}
+
+.series-layer.film-vertical .recom-shelf:last-child .rec-card {
+  width: 100%;
+}
+
+.series-layer.film-vertical .recom-shelf:last-child .rec-card .poster {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+}

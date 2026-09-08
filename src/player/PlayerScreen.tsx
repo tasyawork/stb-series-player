@@ -48,7 +48,9 @@ type PanelOption = { kind: "quality" | "audio" | "subtitle"; value: string };
 // Вариант прототипа: "plain" — базовый, "recom" — с рекомендациями.
 // Пока оба ведут себя одинаково; крючок для будущих правок второго варианта.
 // "vertical" пока ведёт себя как plain — ветки редизайна завязаны на "recom"
-type PlayerVariant = "plain" | "recom" | "vertical";
+// "vertical" — Вертикаль 1 (табы сверху, непрерывная лента всех сезонов),
+// "vertical2" — Вертикаль 2 (табы слева, посезонно, вертикальный скролл)
+type PlayerVariant = "plain" | "recom" | "vertical" | "vertical2";
 
 // Тип контента: сериал (серии с табами сезонов) или фильм (две галереи)
 type PlayerContent = "series" | "film";
@@ -58,6 +60,8 @@ type PlayerScreenProps = {
   onExit: () => void;
   variant?: PlayerVariant;
   content?: PlayerContent;
+  /* Фильм «Вертикаль»: вторая галерея — сетка со скроллом вниз (4 в ряду) */
+  filmVertical?: boolean;
 };
 
 function PlayerScreenView({
@@ -65,6 +69,7 @@ function PlayerScreenView({
   onExit,
   variant = "plain",
   content = "series",
+  filmVertical = false,
 }: PlayerScreenProps) {
   const [activeSeason, setActiveSeason] = useState(series.loadedSeason);
   /*
@@ -95,6 +100,17 @@ function PlayerScreenView({
           .map((item) => item.id)
       : [];
   const demoStarted = new Set(demoStartedIds);
+  /*
+    Демо-шильд «смотрят 50K»: у «Холода» показываем его на 7-й серии — перед
+    таймингом появляется счётчик зрителей с иконкой.
+  */
+  const demoWatching = new Map<number, string>();
+  if (series.slug === "holod") {
+    const ep7 = series.episodes.find(
+      (item) => item.season === series.loadedSeason && item.episode === 7,
+    );
+    if (ep7) demoWatching.set(ep7.id, "50K");
+  }
   // Открываем сезон на серии, которую действительно можно смотреть: под замком
   // играть нечего, просмотренные и начатую пропускаем — стартуем на седьмой (в эфире)
   const firstEpisode =
@@ -120,8 +136,6 @@ function PlayerScreenView({
   const [playing, setPlaying] = useState(true);
   const [focus, setFocus] = useState<Focus>("pause");
   const [railIndex, setRailIndex] = useState(0);
-  // Раскрыта ли схлопнутая пачка просмотренных серий (сетка, 12+ серий)
-  const [expandedWatched, setExpandedWatched] = useState(false);
   // Фокус во второй галерее «От того же режиссёра» (только вариант recom)
   const [recomIndex, setRecomIndex] = useState(0);
   const [panel, setPanel] = useState<"quality" | "audio" | null>(null);
@@ -242,30 +256,51 @@ function PlayerScreenView({
   // Ряд серий всегда 152 (как в «Без рекома»), галереи рекомендаций — 224
   const EPISODE_CARD_W = 152;
   const RECOM_CARD_W = 224;
-  // Новая раскладка серий/сезонов: сезоны слева, серии сеткой справа, скролл вниз.
-  // Только вариант «Вертикальный»; «Без рекома», recom и фильм — прежняя раскладка.
-  const gridLayout = content === "series" && variant === "vertical";
+  // Сетка серий (вертикальный скролл) — оба вертикальных режима:
+  //  gridTop  (Вертикаль 1): табы сверху, непрерывная лента всех сезонов;
+  //  gridLeft (Вертикаль 2): табы слева, посезонно (прежняя раскладка).
+  const gridTop = content === "series" && variant === "vertical";
+  const gridLeft = content === "series" && variant === "vertical2";
+  const gridLayout = gridTop || gridLeft;
   const GRID_COLUMNS = 4;
+  // Платный тайтл без активной подписки: перед первой серией — карточка подписки.
+  // Она занимает ячейку 0 ряда, сдвигая индексы реальных серий на subOffset.
+  const showSubCard =
+    (isRecom || gridLayout) &&
+    series.subscriptionRequired &&
+    !series.subscriptionActive;
+  const subOffset = showSubCard ? 1 : 0;
+  const SUB_NAME = "ИВИ + Амедиатека";
+  const SUB_PRICE = "399 ₽";
   /*
-    Схлопывание просмотренных: если сезон открывается длинной (12+) непрерывной
-    чередой полностью просмотренных серий в начале, сворачиваем их в одну карточку
-    «Раскрыть». Только в вертикальной сетке (Figma Daily). Начатые серии в череду
-    не входят. railCount — число ячеек ряда с учётом свёртки; функции ниже
-    переводят между индексом ячейки ряда (railIndex) и индексом реальной серии.
+    Вертикальная сетка — непрерывная лента всех сезонов: серии всех сезонов идут
+    подряд, между сезонами — заголовок-разделитель «N сезон». Индекс ряда
+    (railIndex) в сетке нумерует карточки-фокусы подряд: 0 — карточка подписки
+    (если есть), дальше серии всех сезонов по порядку. Разделители не фокусируются.
   */
-  const COLLAPSE_MIN = 12;
-  let leadingWatched = 0;
-  if (gridLayout) {
-    for (const item of seasonEpisodes) {
-      if (item.availability === "available" && watchedEpisodes.has(item.id)) leadingWatched += 1;
-      else break;
+  const gridSeasons = useMemo(
+    () =>
+      series.seasons.map((s) => ({
+        number: s.number,
+        year: s.year,
+        episodes: episodesBySeason[s.number] ?? [],
+      })),
+    [series.seasons, episodesBySeason],
+  );
+  // Плоский список серий всех сезонов и индекс серии, с которой начинается сезон
+  const gridFlat = useMemo(() => gridSeasons.flatMap((s) => s.episodes), [gridSeasons]);
+  const seasonFlatStart = useMemo(() => {
+    const map = new Map<number, number>();
+    let acc = 0;
+    for (const s of gridSeasons) {
+      map.set(s.number, acc);
+      acc += s.episodes.length;
     }
-  }
-  const collapseCount = !expandedWatched && leadingWatched >= COLLAPSE_MIN ? leadingWatched : 0;
-  const railCount =
-    collapseCount > 0 ? seasonEpisodes.length - collapseCount + 1 : seasonEpisodes.length;
-  // Подпись схлопнутой карточки: «N серий» + «Просмотрено»
-  const collapseLabel = collapseCount > 0 ? episodesCountLabel(collapseCount) : "";
+    return map;
+  }, [gridSeasons]);
+  // Число фокусируемых ячеек ряда: карточка подписки + все серии всех сезонов
+  // Вертикаль 1 — сквозь все сезоны; Вертикаль 2 — только активный сезон
+  const railCount = subOffset + (gridTop ? gridFlat.length : seasonEpisodes.length);
   /*
     Две галереи фильма: берём готовые именованные подборки (series.galleries),
     а если их нет — откатываемся на общий ряд рекомендаций (вторую полку
@@ -284,7 +319,7 @@ function PlayerScreenView({
   // Платный тайтл в recom: у постера в фокусе градиентная рамка вместо белой
   // обводки и шильд «По подписке» в подписи. Триггер — подписочный контент
   // (SVOD/платные сезоны); тариф (Старт, Медиатека…) роли не играет.
-  const paidBadge = (isRecom || variant === "vertical") && series.subscriptionRequired;
+  const paidBadge = (isRecom || gridLayout) && series.subscriptionRequired;
 
   const qualityOptions = useMemo(
     () => ["Авто", ...series.capabilities.qualities.filter((item) => item !== "Авто")],
@@ -499,20 +534,16 @@ function PlayerScreenView({
     return () => window.clearTimeout(timer);
   }, [activity, browsing]);
 
-  // Вышли из шторки в плеер — просмотренные снова показываем свёрнутыми при заходе
-  useEffect(() => {
-    if (!browsing) setExpandedWatched(false);
-  }, [browsing]);
-
   const selectSeason = useCallback(
     (season: number) => {
       setActiveSeason(season);
-      setRailIndex(0);
       setRecomIndex(0);
-      // Новый сезон — своя череда просмотренных: пачку снова показываем свёрнутой
-      setExpandedWatched(false);
+      // В сетке лента непрерывная — прыгаем к первой серии выбранного сезона;
+      // в остальных раскладках сезон меняет содержимое ряда, начинаем с начала
+      if (gridTop) setRailIndex(subOffset + (seasonFlatStart.get(season) ?? 0));
+      else setRailIndex(0);
     },
-    [],
+    [gridTop, subOffset, seasonFlatStart],
   );
 
   const playableIndex = playableEpisodes.findIndex((item) => item.id === episode?.id);
@@ -570,15 +601,15 @@ function PlayerScreenView({
       if (id === "episodes") {
         // В фильме галерея — рекомендации-заглушки, выбирать в ней нечего
         if (isFilm) return;
-        // Ряд может начинаться со схлопнутой карточки просмотренных: ОК по ней —
-        // раскрыть пачку и встать на ПОСЛЕДНЮЮ просмотренную серию
-        if (collapseCount > 0 && railIndex === 0) {
-          setExpandedWatched(true);
-          setRailIndex(collapseCount - 1);
+        // Платный тайтл: ячейка 0 — карточка подписки, ОК открывает страницу подписки
+        if (showSubCard && railIndex === 0) {
+          window.open(series.iviUrl, "_blank", "noopener,noreferrer");
           return;
         }
-        const realIndex = collapseCount > 0 ? collapseCount + railIndex - 1 : railIndex;
-        const chosen = seasonEpisodes[realIndex];
+        // В сетке ряд — непрерывная лента всех сезонов (gridFlat), иначе — серии
+        // активного сезона. Карточка подписки (ячейка 0) уже обработана выше.
+        const list = gridTop ? gridFlat : seasonEpisodes;
+        const chosen = list[railIndex - subOffset];
         if (chosen?.isLocked) {
           showToast("Оформите подписку, чтобы смотреть эту серию");
         } else if (chosen?.availability === "available") {
@@ -614,9 +645,10 @@ function PlayerScreenView({
     },
     [
       audio,
-      collapseCount,
       episodeReminders,
       goRelative,
+      gridFlat,
+      gridTop,
       hasPrev,
       isFilm,
       isRecom,
@@ -628,6 +660,8 @@ function PlayerScreenView({
       seasonEpisodes,
       series.capabilities.audioTracks,
       series.iviUrl,
+      showSubCard,
+      subOffset,
       showToast,
     ],
   );
@@ -652,20 +686,57 @@ function PlayerScreenView({
     }
 
     function focusEpisodesIn(season: number) {
-      const episodes = episodesBySeason[season] ?? [];
-      const index = episodes.findIndex((item) => item.id === episode?.id);
-      const realIndex = index >= 0 ? index : 0;
-      // Свёртка просмотренных считается для активного сезона: карту применяем только к нему
-      const useCollapse = collapseCount > 0 && season === activeSeason;
-      const targetIndex = useCollapse
-        ? realIndex < collapseCount
-          ? 0
-          : realIndex - collapseCount + 1
-        : realIndex;
+      // В сетке лента непрерывная: встаём на текущую (играющую) серию по всему
+      // списку сезонов. В остальных раскладках — индекс серии внутри сезона.
+      let baseIndex: number;
+      if (gridTop) {
+        const flat = gridFlat.findIndex((item) => item.id === episode?.id);
+        baseIndex = flat >= 0 ? flat : (seasonFlatStart.get(season) ?? 0);
+      } else {
+        const episodes = episodesBySeason[season] ?? [];
+        const index = episodes.findIndex((item) => item.id === episode?.id);
+        baseIndex = index >= 0 ? index : 0;
+      }
+      // Платный тайтл: впереди карточка подписки — сдвигаем на неё все индексы
+      const targetIndex = baseIndex + subOffset;
       browseOriginRef.current = { season, index: targetIndex };
       setActiveSeason(season);
       setRailIndex(targetIndex);
       setFocus("episodes");
+    }
+
+    // Сезон по индексу ряда (для синхронизации табов при навигации по сетке)
+    function seasonAtRail(rail: number): number {
+      const flat = rail - subOffset;
+      if (flat < 0) return activeSeason;
+      const found = gridFlat[Math.max(0, Math.min(gridFlat.length - 1, flat))];
+      return found?.season ?? activeSeason;
+    }
+
+    // Вверх/вниз по сетке — по геометрии: ближайшая карточка ряда выше/ниже.
+    // Возвращает railIndex или null (упёрлись/нет ряда в эту сторону).
+    function gridNeighbor(dir: 1 | -1): number | null {
+      const railEl = document.querySelector<HTMLElement>(".rail.grid");
+      if (!railEl) return null;
+      const cards = Array.from(railEl.querySelectorAll<HTMLElement>("[data-railindex]"));
+      const currentEl = cards.find((c) => Number(c.dataset.railindex) === railIndex);
+      if (!currentEl) return null;
+      const cr = currentEl.getBoundingClientRect();
+      const cx = cr.left + cr.width / 2;
+      let best: { idx: number; dx: number; dy: number } | null = null;
+      for (const c of cards) {
+        const r = c.getBoundingClientRect();
+        // Ряд ниже (dir 1) или выше (dir -1): центр по вертикали за пределами текущей карточки
+        const below = r.top > cr.bottom - 4;
+        const above = r.bottom < cr.top + 4;
+        if ((dir === 1 && !below) || (dir === -1 && !above)) continue;
+        const dx = Math.abs(r.left + r.width / 2 - cx);
+        const dy = dir === 1 ? r.top - cr.bottom : cr.top - r.bottom;
+        if (!best || dy < best.dy - 1 || (Math.abs(dy - best.dy) <= 1 && dx < best.dx)) {
+          best = { idx: Number(c.dataset.railindex), dx, dy };
+        }
+      }
+      return best ? best.idx : null;
     }
 
     function onKey(event: KeyboardEvent) {
@@ -734,13 +805,23 @@ function PlayerScreenView({
           return;
         }
         if (focus === "episodes") {
-          if (gridLayout) {
-            // Сетка: вправо — следующая карточка; влево из левого столбца — к сезонам
+          if (gridTop) {
+            // Вертикаль 1: вправо/влево — соседняя карточка непрерывной ленты; таб
+            // сверху подхватывает сезон новой карточки
+            const total = railCount;
+            const next = Math.max(0, Math.min(total - 1, railIndex + step));
+            setRailIndex(next);
+            const s = seasonAtRail(next);
+            if (s !== activeSeason) setActiveSeason(s);
+            return;
+          }
+          if (gridLeft) {
+            // Вертикаль 2: вправо — следующая карточка; влево из левого столбца — к табам
             const total = railCount;
             if (step > 0) {
               setRailIndex((value) => Math.min(total - 1, value + 1));
             } else if (railIndex % GRID_COLUMNS === 0) {
-              if (!singleSeason) setFocus("seasons");
+              setFocus("seasons");
             } else {
               setRailIndex((value) => Math.max(0, value - 1));
             }
@@ -752,9 +833,10 @@ function PlayerScreenView({
             setRailIndex((value) => Math.max(0, Math.min(last, value + step)));
             return;
           }
-          const total = seasonEpisodes.length;
-          const loop = total > 15; // закольцовка листинга у длинных сезонов
-          const accel = total >= 30; // разгон при удержании у очень длинных
+          const total = seasonEpisodes.length + subOffset;
+          // Платный тайтл (есть карточка подписки) листаем без закольцовки
+          const loop = !showSubCard && seasonEpisodes.length > 15;
+          const accel = seasonEpisodes.length >= 30; // разгон при удержании у очень длинных
           // Геометрический разгон только при удержании (event.repeat) и в одну сторону
           const rr = railRepeatRef.current;
           if (!event.repeat || rr.dir !== step) {
@@ -781,11 +863,12 @@ function PlayerScreenView({
           return;
         }
         if (focus === "seasons") {
-          if (gridLayout) {
-            // Сезоны вертикально: вправо — в сетку серий; влево — никуда
+          if (gridLeft) {
+            // Вертикаль 2: табы слева — вправо уходим в сетку серий, влево некуда
             if (step > 0) setFocus("episodes");
             return;
           }
+          // Горизонталь и Вертикаль 1: горизонтальный ряд табов — влево/вправо меняют сезон
           const index = series.seasons.findIndex((s) => s.number === activeSeason);
           const next = series.seasons[index + step];
           if (next) selectSeason(next.number);
@@ -798,15 +881,33 @@ function PlayerScreenView({
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
         if (event.key === "ArrowDown") {
-          if (gridLayout && focus === "episodes") {
-            // Сетка: вниз — на ряд ниже. Если прямой ячейки снизу нет из-за
-            // неполного последнего ряда (2-3 постера), переходим на его первый постер.
+          if (isFilm && filmVertical && focus === "recom") {
+            // Фильм «Вертикаль»: вторая галерея — сетка, вниз на ряд ниже (+колонки)
+            const total = filmBottomItems.length;
+            setRecomIndex((value) => {
+              const below = value + GRID_COLUMNS;
+              return below < total ? below : value;
+            });
+            return;
+          }
+          if (gridTop && focus === "episodes") {
+            // Вертикаль 1: вниз — ближайшая карточка ряда ниже (через разделители
+            // сезонов ведёт в следующий сезон); таб сверху подхватывает новый сезон
+            const nextRail = gridNeighbor(1);
+            if (nextRail !== null) {
+              setRailIndex(nextRail);
+              const s = seasonAtRail(nextRail);
+              if (s !== activeSeason) setActiveSeason(s);
+            }
+            return;
+          }
+          if (gridLeft && focus === "episodes") {
+            // Вертикаль 2: вниз — на ряд ниже (+колонки), с обработкой неполного ряда
             const total = railCount;
             setRailIndex((value) => {
               const below = value + GRID_COLUMNS;
               const lastRowStart = Math.floor((total - 1) / GRID_COLUMNS) * GRID_COLUMNS;
               const lastRowPartial = total - lastRowStart < GRID_COLUMNS;
-              // Из ряда прямо над неполным последним рядом — на его первый постер
               if (lastRowPartial && value < lastRowStart && below >= lastRowStart) {
                 return lastRowStart;
               }
@@ -814,7 +915,13 @@ function PlayerScreenView({
             });
             return;
           }
-          if (gridLayout && focus === "seasons") {
+          if (gridTop && focus === "seasons") {
+            // Вертикаль 1: табы сверху — вниз в сетку серий
+            setFocus("episodes");
+            return;
+          }
+          if (gridLeft && focus === "seasons") {
+            // Вертикаль 2: табы слева колонкой — вниз к следующему сезону
             const index = series.seasons.findIndex((s) => s.number === activeSeason);
             const next = series.seasons[index + 1];
             if (next) selectSeason(next.number);
@@ -839,16 +946,39 @@ function PlayerScreenView({
           return;
         }
 
-        if (gridLayout && focus === "episodes") {
-          // Сетка: вверх — на ряд выше; из верхнего ряда — на таймлайн
+        if (isFilm && filmVertical && focus === "recom") {
+          // Фильм «Вертикаль»: вверх на ряд выше; из верхнего ряда — в первую галерею
+          if (recomIndex >= GRID_COLUMNS) setRecomIndex((value) => value - GRID_COLUMNS);
+          else setFocus("episodes");
+          return;
+        }
+        if (gridTop && focus === "episodes") {
+          // Вертикаль 1: вверх — ближайшая карточка ряда выше; из самого верха — на табы
+          const prevRail = gridNeighbor(-1);
+          if (prevRail !== null) {
+            setRailIndex(prevRail);
+            const s = seasonAtRail(prevRail);
+            if (s !== activeSeason) setActiveSeason(s);
+          } else {
+            setFocus("seasons");
+          }
+          return;
+        }
+        if (gridLeft && focus === "episodes") {
+          // Вертикаль 2: вверх — на ряд выше; из верхнего ряда — на таймлайн
           if (railIndex >= GRID_COLUMNS) setRailIndex((value) => value - GRID_COLUMNS);
           else setFocus("seek");
           return;
         }
-        if (gridLayout && focus === "seasons") {
+        if (gridTop && focus === "seasons") {
+          // Вертикаль 1: табы сверху — вверх обратно на таймлайн плеера
+          setFocus("seek");
+          return;
+        }
+        if (gridLeft && focus === "seasons") {
+          // Вертикаль 2: табы слева колонкой — вверх к предыдущему сезону, с первого — в плеер
           const index = series.seasons.findIndex((s) => s.number === activeSeason);
           const prev = series.seasons[index - 1];
-          // С первого сезона вверх — возврат в плеер (на таймлайн), а не тупик
           if (prev) selectSeason(prev.number);
           else setFocus("seek");
           return;
@@ -856,8 +986,8 @@ function PlayerScreenView({
         if (focus === "notify" || focus === "subscription" || focus === "recom") {
           setFocus("episodes");
         } else if (focus === "episodes") {
-          // Нет табов сезонов (фильм или один сезон) — уходим сразу на таймлайн
-          setFocus(isFilm || singleSeason ? "seek" : "seasons");
+          // Нет табов сезонов (только фильм) — уходим сразу на таймлайн
+          setFocus(isFilm ? "seek" : "seasons");
         } else if (focus === "seasons") {
           setFocus("seek");
         } else if (focus === "seek") {
@@ -873,7 +1003,6 @@ function PlayerScreenView({
     activeSeason,
     applyPanelOption,
     browsing,
-    collapseCount,
     controlsVisible,
     duration,
     episode?.id,
@@ -881,13 +1010,17 @@ function PlayerScreenView({
     episodesBySeason,
     filmBottomItems.length,
     filmTopItems.length,
+    filmVertical,
     focus,
     focusRow,
-    gridLayout,
+    gridFlat,
+    gridLeft,
+    gridTop,
     isFilm,
     isRecom,
     railCount,
     railIndex,
+    seasonFlatStart,
     singleSeason,
     onExit,
     panel,
@@ -899,6 +1032,8 @@ function PlayerScreenView({
     selectSeason,
     series.recommendations.length,
     series.seasons,
+    showSubCard,
+    subOffset,
     showSubscriptionOffer,
     wakeControls,
   ]);
@@ -1018,7 +1153,9 @@ function PlayerScreenView({
         <div
           className={`series-layer${browsing ? " open" : ""}${
             isRecom && focus === "recom" ? " raised" : ""
-          }${gridLayout ? " grid-layout" : ""}`}
+          }${gridLayout ? " grid-layout" : ""}${gridTop ? " grid-top" : ""}${
+            gridLeft ? " grid-left" : ""
+          }${isFilm && filmVertical ? " film-vertical" : ""}`}
         >
           {isFilm ? (
             /* Верхняя галерея фильма вместо ряда серий */
@@ -1037,7 +1174,7 @@ function PlayerScreenView({
                 seasons={series.seasons}
                 activeSeason={activeSeason}
                 focusedSeason={focus === "seasons" ? activeSeason : null}
-                vertical={gridLayout}
+                vertical={gridLeft}
               />
               <EpisodeRail
                 episodes={seasonEpisodes}
@@ -1054,11 +1191,14 @@ function PlayerScreenView({
                 watched={variant === "plain" ? undefined : watchedEpisodes}
                 started={variant === "plain" ? undefined : startedEpisodes}
                 grid={gridLayout}
+                gridSeasons={gridTop ? gridSeasons : undefined}
                 columns={GRID_COLUMNS}
                 bottomAnchor={singleSeason}
                 scrollActive={browsing}
-                collapseCount={collapseCount}
-                collapseLabel={collapseLabel}
+                subCard={showSubCard}
+                subName={SUB_NAME}
+                subPrice={SUB_PRICE}
+                watching={demoWatching}
               />
             </>
           )}
@@ -1072,6 +1212,9 @@ function PlayerScreenView({
                 focusedIndex={focus === "recom" ? recomIndex : null}
                 anchorIndex={recomIndex}
                 cardWidth={RECOM_CARD_W}
+                grid={isFilm && filmVertical}
+                columns={GRID_COLUMNS}
+                scrollActive={browsing && focus === "recom"}
               />
             </div>
           ) : gridLayout ? null : (
@@ -1154,11 +1297,3 @@ function formatReleaseDate(value: string): string {
   }).format(date);
 }
 
-// «12 серий» / «22 серии» / «21 серия» — заголовок схлопнутой пачки просмотренных
-function episodesCountLabel(count: number): string {
-  const teens = count % 100 >= 11 && count % 100 <= 14;
-  const last = count % 10;
-  if (!teens && last === 1) return `${count} серия`;
-  if (!teens && last >= 2 && last <= 4) return `${count} серии`;
-  return `${count} серий`;
-}

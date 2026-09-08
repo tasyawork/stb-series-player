@@ -46,14 +46,7 @@ export const SeasonTabs = memo(function SeasonTabs({
   }, [activeSeason, focusedSeason, seasons, vertical]);
 
   if (seasons.length === 0) return null;
-  // Один сезон — не таб, а простой некликабельный заголовок
-  if (seasons.length === 1) {
-    return (
-      <div className="season-tabs">
-        <div className="season-heading">{seasons[0].number} сезон</div>
-      </div>
-    );
-  }
+  // Даже единственный сезон показываем как кликабельный таб (не заголовок)
   return (
     <div className="season-tabs" ref={viewportRef}>
       <div
@@ -78,8 +71,8 @@ export const SeasonTabs = memo(function SeasonTabs({
               >
                 {season.number} сезон
               </div>
-              {/* Год справа — только в вертикальной сетке и только у сезона в фокусе */}
-              {vertical && focused && season.year ? (
+              {/* Год справа — у длинных сериалов (5+ сезонов), у сезона в фокусе */}
+              {seasons.length >= 5 && focused && season.year ? (
                 <span className="season-year">{season.year}</span>
               ) : null}
             </div>

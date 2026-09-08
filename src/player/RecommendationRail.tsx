@@ -1,4 +1,5 @@
-import { memo } from "react";
+import { memo, useLayoutEffect, useRef } from "react";
+import type { CSSProperties } from "react";
 import type { IviRecommendation } from "../ivi/types";
 
 /** Те же размеры, что у ряда серий: держим синхронно с --poster-w/--poster-gap */
@@ -13,6 +14,11 @@ type RecommendationRailProps = {
   anchorIndex: number;
   cardWidth?: number;
   gap?: number;
+  /* Сетка (фильм «Вертикаль»): 4 карточки в ряд, вертикальный скролл вниз */
+  grid?: boolean;
+  columns?: number;
+  /* Прокрутка сетки активна только при открытой шторке */
+  scrollActive?: boolean;
 };
 
 /*
@@ -26,15 +32,69 @@ export const RecommendationRail = memo(function RecommendationRail({
   anchorIndex,
   cardWidth = DEFAULT_CARD_W,
   gap = DEFAULT_GAP,
+  grid = false,
+  columns = 4,
+  scrollActive = true,
 }: RecommendationRailProps) {
   const cardStep = cardWidth + gap;
   const trackWidth = items.length * cardStep - gap;
   const maxOffset = Math.max(0, trackWidth - WINDOW);
   const offset = Math.min(Math.max(0, anchorIndex) * cardStep, maxOffset);
 
+  const railRef = useRef<HTMLDivElement | null>(null);
+  const gridScroll = useRef(0);
+  const wasActive = useRef(false);
+
+  // Сетка: держим фокусную карточку в видимой области (мгновенно при открытии)
+  useLayoutEffect(() => {
+    if (!grid) return;
+    const el = railRef.current;
+    const vp = el?.parentElement;
+    if (!el || !vp) return;
+    const animate = scrollActive && wasActive.current;
+    wasActive.current = scrollActive;
+    const place = (y: number) => {
+      if (animate) {
+        el.style.transform = `translateY(${y}px)`;
+        return;
+      }
+      el.style.transition = "none";
+      el.style.transform = `translateY(${y}px)`;
+      void el.offsetHeight;
+      el.style.transition = "";
+    };
+    if (!scrollActive) {
+      gridScroll.current = 0;
+      place(0);
+      return;
+    }
+    const vh = vp.clientHeight;
+    const idx = focusedIndex ?? anchorIndex ?? 0;
+    const card = el.children[idx] as HTMLElement | undefined;
+    if (!card) return;
+    const M = 10;
+    const top = card.offsetTop;
+    const bottom = top + card.offsetHeight;
+    let scroll = gridScroll.current;
+    if (bottom + M > scroll + vh) scroll = bottom + M - vh;
+    if (top - M < scroll) scroll = top - M;
+    const maxScroll = Math.max(0, el.scrollHeight - vh);
+    scroll = Math.max(0, Math.min(scroll, maxScroll));
+    gridScroll.current = scroll;
+    place(-scroll);
+  }, [grid, focusedIndex, anchorIndex, items.length, scrollActive]);
+
   return (
     <div className="rail-viewport">
-      <div className="rail" style={{ transform: `translateX(${-offset}px)` }}>
+      <div
+        ref={railRef}
+        className={grid ? "rail grid" : "rail"}
+        style={
+          grid
+            ? ({ "--grid-cols": columns } as CSSProperties)
+            : { transform: `translateX(${-offset}px)` }
+        }
+      >
         {items.map((item, index) => (
           <div key={item.id} className={`rec-card${focusedIndex === index ? " focused" : ""}`}>
             <div className="poster">

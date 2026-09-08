@@ -462,7 +462,19 @@ function isBloggerGenre(name: string): boolean {
 */
 function authorTag(title: string): string {
   const parts = title.split(/\.\s+/);
-  return parts.length > 1 ? parts[parts.length - 1].trim() : "";
+  const raw = parts.length > 1 ? parts[parts.length - 1].trim() : "";
+  return shortenAuthor(raw);
+}
+
+/*
+  Некоторые имена блогеров слишком длинные, чтобы влезть в мету карточки
+  (выпуск «съезжает» из блока). Такие сокращаем до фамилии.
+*/
+function shortenAuthor(author: string): string {
+  // Блогер «Елизавета Карагозова»: полное имя не влезает в мету карточки —
+  // оставляем только фамилию (в т.ч. если в хвост попал заголовок выпуска)
+  if (/карагозова|карамазова/i.test(author)) return "Карагозова";
+  return author;
 }
 
 function titleWithoutAuthor(title: string): string {

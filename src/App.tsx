@@ -23,17 +23,21 @@ const EXAMPLES = [
   { label: "Платный", q: "https://www.ivi.ru/watch/dva-holma" },
 ];
 
-type Mode = "plain" | "recom" | "vertical";
+// recom → «Горизонталь», vertical → «Вертикаль 1» (табы сверху, непрерывная лента),
+// vertical2 → «Вертикаль 2» (табы слева, посезонно, вертикальный скролл)
+type Mode = "plain" | "recom" | "vertical" | "vertical2";
 // Правый переключатель: сериал (текущий прототип) или фильм (две галереи)
 type Content = "series" | "film";
 
 export function App() {
   const [query, setQuery] = useState(EXAMPLES[0].q);
   const [loaded, setLoaded] = useState(EXAMPLES[0].q);
-  // Вкладка прототипа: «Без рекома» / «С рекомом». Пока обе показывают один плеер
-  const [mode, setMode] = useState<Mode>("plain");
+  // Вкладка прототипа: «Горизонтальный» (recom) / «Вертикальный»
+  const [mode, setMode] = useState<Mode>("recom");
   // Тип контента: «Сериал» / «Фильм». В фильме вместо серий — две галереи
   const [content, setContent] = useState<Content>("series");
+  // Раскладка фильма: «Горизонталь» (две ленты) / «Вертикаль» (вторая галерея сеткой вниз)
+  const [filmVertical, setFilmVertical] = useState(false);
   // Фильм для вкладки «Фильм» грузится один раз и отдельно от сериала-пресета
   const [film, setFilm] = useState<IviSeries | null>(null);
   // Подсветка чипа не ждёт сеть: выбор виден в том же кадре, что клик
@@ -157,31 +161,49 @@ export function App() {
           <div className="mode-switch" role="group" aria-label="Вариант прототипа">
             <button
               type="button"
-              className={`mode-btn${mode === "plain" ? " active" : ""}`}
-              aria-pressed={mode === "plain"}
-              onClick={() => setMode("plain")}
-            >
-              Без рекома
-            </button>
-            <button
-              type="button"
               className={`mode-btn${mode === "recom" ? " active" : ""}`}
               aria-pressed={mode === "recom"}
               onClick={() => setMode("recom")}
             >
-              С рекомом
+              Горизонталь
             </button>
-            {/* Пока ведёт себя как «Без рекома» (plain); правки будут позже */}
             <button
               type="button"
               className={`mode-btn${mode === "vertical" ? " active" : ""}`}
               aria-pressed={mode === "vertical"}
               onClick={() => setMode("vertical")}
             >
-              Вертикальный
+              Вертикаль 1
+            </button>
+            <button
+              type="button"
+              className={`mode-btn${mode === "vertical2" ? " active" : ""}`}
+              aria-pressed={mode === "vertical2"}
+              onClick={() => setMode("vertical2")}
+            >
+              Вертикаль 2
             </button>
           </div>
-        ) : null}
+        ) : (
+          <div className="mode-switch" role="group" aria-label="Раскладка фильма">
+            <button
+              type="button"
+              className={`mode-btn${!filmVertical ? " active" : ""}`}
+              aria-pressed={!filmVertical}
+              onClick={() => setFilmVertical(false)}
+            >
+              Горизонталь
+            </button>
+            <button
+              type="button"
+              className={`mode-btn${filmVertical ? " active" : ""}`}
+              aria-pressed={filmVertical}
+              onClick={() => setFilmVertical(true)}
+            >
+              Вертикаль
+            </button>
+          </div>
+        )}
 
         <div className="content-switch" role="group" aria-label="Тип контента">
           <button
@@ -205,9 +227,12 @@ export function App() {
         <div className="player-stage">
         {shown ? (
           <PlayerScreen
-            key={`${content === "film" ? FILM_URL : loaded}::${mode}::${content}`}
+            key={`${content === "film" ? FILM_URL : loaded}::${mode}::${content}::${
+              filmVertical ? "v" : "h"
+            }`}
             variant={mode}
             content={content}
+            filmVertical={content === "film" && filmVertical}
             series={shown}
             onExit={returnFocusToInput}
           />
