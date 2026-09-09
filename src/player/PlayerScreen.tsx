@@ -136,6 +136,8 @@ function PlayerScreenView({
   const [playing, setPlaying] = useState(true);
   const [focus, setFocus] = useState<Focus>("pause");
   const [railIndex, setRailIndex] = useState(0);
+  // Вертикаль 1: прокручена ли сетка (ряды ушли под шапку) — включает затемнение под табами
+  const [gridScrolled, setGridScrolled] = useState(false);
   // Фокус во второй галерее «От того же режиссёра» (только вариант recom)
   const [recomIndex, setRecomIndex] = useState(0);
   const [panel, setPanel] = useState<"quality" | "audio" | null>(null);
@@ -1155,7 +1157,9 @@ function PlayerScreenView({
             isRecom && focus === "recom" ? " raised" : ""
           }${gridLayout ? " grid-layout" : ""}${gridTop ? " grid-top" : ""}${
             gridLeft ? " grid-left" : ""
-          }${isFilm && filmVertical ? " film-vertical" : ""}`}
+          }${gridTop && gridScrolled ? " grid-scrolled" : ""}${
+            isFilm && filmVertical ? " film-vertical" : ""
+          }`}
         >
           {isFilm ? (
             /* Верхняя галерея фильма вместо ряда серий */
@@ -1199,6 +1203,7 @@ function PlayerScreenView({
                 subName={SUB_NAME}
                 subPrice={SUB_PRICE}
                 watching={demoWatching}
+                onScrolled={setGridScrolled}
               />
             </>
           )}

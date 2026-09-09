@@ -82,6 +82,8 @@ type EpisodeRailProps = {
     Ключ — id серии, значение — счётчик («50K»).
   */
   watching?: Map<number, string>;
+  /* Сетка: сообщает наружу, прокручена ли лента (ряды ушли под шапку с табами) */
+  onScrolled?: (scrolled: boolean) => void;
 };
 
 // Доля серии, оставшаяся у начатой (демо): полоса прогресса стоит на 45%
@@ -120,6 +122,7 @@ export const EpisodeRail = memo(function EpisodeRail({
   subName = "",
   subPrice = "",
   watching,
+  onScrolled,
 }: EpisodeRailProps) {
   const cardStep = cardWidth + gap;
   const count = episodes.length;
@@ -178,10 +181,13 @@ export const EpisodeRail = memo(function EpisodeRail({
       void el.offsetHeight; // зафиксировать позицию до восстановления перехода
       el.style.transition = "";
     };
+    // Прокручена ли лента вниз (ряды уходят под шапку) — для затемнения под табами
+    const report = (scrolled: boolean) => onScrolled?.(scrolled);
     // Закрытая шторка: держим сетку наверху, чтобы «уши» первого ряда выглядывали
     if (!scrollActive) {
       gridScroll.current = 0;
       place(0);
+      report(false);
       return;
     }
     const vh = vp.clientHeight;
@@ -189,6 +195,7 @@ export const EpisodeRail = memo(function EpisodeRail({
     if (bottomAnchor && el.scrollHeight <= vh) {
       gridScroll.current = 0;
       place(vh - el.scrollHeight);
+      report(false);
       return;
     }
     const idx = focusedIndex ?? anchorIndex ?? 0;
@@ -205,7 +212,8 @@ export const EpisodeRail = memo(function EpisodeRail({
     scroll = Math.max(0, Math.min(scroll, maxScroll));
     gridScroll.current = scroll;
     place(-scroll);
-  }, [grid, focusedIndex, anchorIndex, count, bottomAnchor, scrollActive]);
+    report(scroll > 0);
+  }, [grid, focusedIndex, anchorIndex, count, bottomAnchor, scrollActive, onScrolled]);
 
   useLayoutEffect(() => {
     if (grid) return;

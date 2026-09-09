@@ -861,8 +861,29 @@ input {
   left: -68px;
   right: -68px;
   top: -40px;
-  /* Затемнение под табами глубже и длиннее — доходит до верха первого ряда, чтобы
-     тёмная полоса под табами была видна и когда фокус на самом верхнем ряду серий */
+  /* По умолчанию (фокус на верхнем ряду, лента не прокручена) — лёгкое короткое
+     затемнение только под самими табами, не заходит на первый ряд постеров. */
+  height: 116px;
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.72) 0%,
+    rgba(0, 0, 0, 0.5) 55%,
+    rgba(0, 0, 0, 0) 100%
+  );
+  pointer-events: none;
+  z-index: 5;
+  opacity: 0;
+  transition: opacity var(--duration-scrim) ease, height var(--duration-scrim) ease,
+    background var(--duration-scrim) ease;
+}
+
+.series-layer.grid-top.open::before {
+  opacity: 1;
+}
+
+/* Как только лента прокручена вниз (ряды уходят под шапку) — затемнение
+   становится глубже и длиннее, чтобы уезжающие вверх серии тонули в темноте. */
+.series-layer.grid-top.grid-scrolled::before {
   height: 240px;
   background: linear-gradient(
     180deg,
@@ -872,14 +893,6 @@ input {
     rgba(0, 0, 0, 0.45) 82%,
     rgba(0, 0, 0, 0) 100%
   );
-  pointer-events: none;
-  z-index: 5;
-  opacity: 0;
-  transition: opacity var(--duration-scrim) ease;
-}
-
-.series-layer.grid-top.open::before {
-  opacity: 1;
 }
 
 .grid-top .season-tabs {
