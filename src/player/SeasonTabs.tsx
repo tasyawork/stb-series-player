@@ -71,10 +71,6 @@ export const SeasonTabs = memo(function SeasonTabs({
               >
                 {season.number} сезон
               </div>
-              {/* Год справа — у длинных сериалов (5+ сезонов), у сезона в фокусе */}
-              {seasons.length >= 5 && focused && season.year ? (
-                <span className="season-year">{season.year}</span>
-              ) : null}
             </div>
           );
         })}
