@@ -861,13 +861,15 @@ input {
   left: -68px;
   right: -68px;
   top: -40px;
-  /* Затемнение под табами глубже и длиннее — серии уезжают вверх в темноту заметнее */
-  height: 176px;
+  /* Затемнение под табами глубже и длиннее — доходит до верха первого ряда, чтобы
+     тёмная полоса под табами была видна и когда фокус на самом верхнем ряду серий */
+  height: 240px;
   background: linear-gradient(
     180deg,
     rgb(0, 0, 0) 0%,
     rgb(0, 0, 0) 40%,
-    rgba(0, 0, 0, 0.85) 66%,
+    rgba(0, 0, 0, 0.85) 64%,
+    rgba(0, 0, 0, 0.45) 82%,
     rgba(0, 0, 0, 0) 100%
   );
   pointer-events: none;
@@ -1317,14 +1319,20 @@ input {
   color: var(--color-sofala);
 }
 
-/* Карточка подписки перед первой серией платного тайтла: тёмный постер с
-   замком по центру, в мете — название подписки и цена */
-.episode-card.sub-card .poster.sub-poster {
-  background: var(--color-varna);
+/* Карточка подписки перед первой серией платного тайтла: без меты — постер
+   растянут на всю высоту карточки (как соседние серии целиком). */
+.episode-card.sub-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  align-self: stretch;
 }
 
-.episode-card.sub-card small.sub-price {
-  color: var(--color-sofala);
+.episode-card.sub-card .poster.sub-poster {
+  flex: 1 1 auto;
+  height: 100%;
+  aspect-ratio: auto;
+  background: var(--color-varna);
 }
 
 .watched-overlay .watched-eye {
@@ -1470,8 +1478,10 @@ input {
 .recom-shelf {
   --poster-w: 224px;
   --poster-h: 126px;
+  /* Описание теперь 2 строки размером с нижнюю мету (kleodora), поэтому высоту
+     карточки считаем от двух строк описания + строки меты */
   --card-h: calc(
-    126px + 12px + var(--typo-amphiris-line) + 4px + var(--typo-kleodora-line)
+    126px + 12px + (var(--typo-kleodora-line) * 2) + 4px + var(--typo-kleodora-line)
   );
 }
 
@@ -1561,10 +1571,13 @@ input {
 
 .rec-card p {
   margin: 12px 0 0;
-  font-size: var(--typo-amphiris-size);
-  line-height: var(--typo-amphiris-line);
+  /* Описание — тем же размером, что и нижняя мета, и в две строки */
+  font-size: var(--typo-kleodora-size);
+  line-height: var(--typo-kleodora-line);
   font-weight: 500;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
   text-overflow: ellipsis;
   /* Первая строка (описание) серая вне фокуса, белая — в фокусе */
@@ -1707,14 +1720,14 @@ input {
 .watch-badge {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 2px;
   color: #3ba1ff;
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
 }
 
 .watch-badge-icon {
-  width: 18px;
+  width: 12px;
   height: 12px;
   object-fit: contain;
 }
@@ -1750,13 +1763,16 @@ input {
 
 /* Первая (горизонтальная) галерея умеет уезжать вверх при переходе в сетку */
 .series-layer.film-vertical .recom-shelf:first-child {
-  transition: margin-top var(--duration-scrim) ease, opacity var(--duration-scrim) ease;
+  transition: margin-top var(--duration-scrim) ease, transform var(--duration-scrim) ease,
+    opacity var(--duration-scrim) ease;
 }
 
-/* Ушли в предложку (raised): горизонтальная галерея уезжает вверх за кадр —
-   не остаётся на фоне, — а сетка поднимается на её место. */
+/* Ушли в предложку (raised): горизонтальная галерея уезжает вверх ПОЛНОСТЬЮ за
+   кадр (не остаётся на фоне), а сетка поднимается на её место. margin-top снимает
+   её из потока (сетка встаёт наверх), а translateY доводит её выше границы кадра. */
 .series-layer.film-vertical.raised .recom-shelf:first-child {
   margin-top: -250px;
+  transform: translateY(-100%);
   opacity: 0;
   pointer-events: none;
 }

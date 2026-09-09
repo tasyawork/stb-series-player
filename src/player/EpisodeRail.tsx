@@ -300,19 +300,23 @@ export const EpisodeRail = memo(function EpisodeRail({
         <small>еще {remainingMinutes(episode.durationSec * (1 - STARTED_PROGRESS))} мин</small>
       );
     } else {
-      // Шильд «смотрят N» (демо: 7 серия) идёт перед таймингом в той же строке
+      // Шильд «смотрят N» (демо: 7 серия). В сетке — вместе с таймингом.
+      // В горизонтальном ряду — только в фокусе, и тогда тайминг прячем;
+      // вне фокуса показываем обычный тайминг серии.
       const watchCount = !clone ? watching?.get(episode.id) : undefined;
+      const showBadge = watchCount ? (grid ? true : focused) : false;
+      const showTiming = showDuration && !(watchCount && !grid && focused);
       secondLine = (
-        <small className={showDuration || watchCount ? "meta-line" : "empty"}>
-          {watchCount ? (
+        <small className={showTiming || showBadge ? "meta-line" : "empty"}>
+          {showBadge ? (
             <span className="watch-badge">
               <img className="watch-badge-icon" src="/icons/watching-eyes.png" alt="" />
               смотрят {watchCount}
             </span>
           ) : null}
-          {showDuration ? (
+          {showTiming ? (
             <span>{formatMinutes(episode.durationSec)}</span>
-          ) : watchCount ? null : (
+          ) : showBadge ? null : (
             " "
           )}
         </small>
@@ -386,26 +390,16 @@ export const EpisodeRail = memo(function EpisodeRail({
     );
   };
 
-  // Карточка подписки перед первой серией у платного тайтла: постер с замком,
-  // в мете — название подписки и цена вместо тайминга.
+  // Карточка подписки перед первой серией у платного тайтла: без меты —
+  // постер-подложка растянут на всю высоту карточки (замка тоже нет).
   const renderSubCard = (focused: boolean) => (
     <div
       key="subscription-card"
       className={`episode-card sub-card${focused ? " focused" : ""}`}
       data-railindex={0}
-      aria-label={`Подписка ${subName}`}
+      aria-label={`Подписка ${subName} ${subPrice}`}
     >
-      <div className="poster sub-poster">
-        <div className="availability-overlay">
-          <img className="lock-icon" src="/icons/locked.svg" alt="По подписке" />
-        </div>
-      </div>
-      <p className="episode-line">
-        <span className="ep-title-clip">
-          <span className="ep-title-text">{subName}</span>
-        </span>
-      </p>
-      <small className="sub-price">{subPrice}</small>
+      <div className="poster sub-poster" />
     </div>
   );
 
