@@ -12,3 +12,6 @@ dist-ssr
 tsconfig.tsbuildinfo
 .vercel
 .artifacts
+
+# Local Claude Code tooling
+.claude

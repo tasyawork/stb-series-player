@@ -46,7 +46,6 @@ export const SeasonTabs = memo(function SeasonTabs({
   }, [activeSeason, focusedSeason, seasons, vertical]);
 
   if (seasons.length === 0) return null;
-  // Даже единственный сезон показываем как кликабельный таб (не заголовок)
   return (
     <div className="season-tabs" ref={viewportRef}>
       <div
@@ -56,6 +55,14 @@ export const SeasonTabs = memo(function SeasonTabs({
         aria-label="Сезоны"
         style={{ transform: vertical ? `translateY(${-offset}px)` : `translateX(${-offset}px)` }}
       >
+        {/* Новый вид: слева статичная подпись «Сезон», далее табы-номера
+            (у активного — красный скруглённый квадрат). Только в горизонтальной
+            раскладке; единственный сезон в неё не попадает (табы не рендерятся). */}
+        {!vertical ? (
+          <div className="season-tabs-label" aria-hidden="true">
+            Сезон
+          </div>
+        ) : null}
         {seasons.map((season) => {
           const selected = season.number === activeSeason;
           const focused = season.number === focusedSeason;
@@ -69,7 +76,9 @@ export const SeasonTabs = memo(function SeasonTabs({
                 role="tab"
                 aria-selected={selected}
               >
-                {season.number} сезон
+                {/* Горизонтальные табы — только номер; вертикальная колонка
+                    (Вертикаль 2) сохраняет полную подпись «N сезон». */}
+                {vertical ? `${season.number} сезон` : season.number}
               </div>
             </div>
           );

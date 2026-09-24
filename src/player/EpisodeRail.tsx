@@ -66,6 +66,13 @@ type EpisodeRailProps = {
   */
   gridSeasons?: { number: number; episodes: IviEpisode[] }[];
   /*
+    Заголовок сезона над сеткой одного сезона («Раздельный»): рендерится как
+    полноширинный элемент грида, поэтому уезжает вверх/вниз вместе с постерами
+    (в отличие от фиксированной подписи). В непрерывной ленте не используется —
+    там заголовки даёт gridSeasons.
+  */
+  leadHeading?: string;
+  /*
     Начатые, но недосмотренные серии: затемнение и глазик, но в мете вместо
     «Начато» — сколько минут осталось до конца, и неполная полоса прогресса.
   */
@@ -118,6 +125,7 @@ export const EpisodeRail = memo(function EpisodeRail({
   bottomAnchor = false,
   scrollActive = true,
   gridSeasons,
+  leadHeading,
   subCard = false,
   subName = "",
   subPrice = "",
@@ -205,9 +213,24 @@ export const EpisodeRail = memo(function EpisodeRail({
     const M = 10;
     const top = card.offsetTop;
     const bottom = top + card.offsetHeight;
+    // Если фокусная серия — в ПЕРВОМ ряду своего сезона, при прокрутке вверх
+    // показываем и заголовок «N сезон» (вместе с его верхним отступом), чтобы он
+    // не уезжал под шапку с табами. Ищем заголовок, идя назад по соседям, пока не
+    // встретим карточку из ряда выше (значит, фокусная серия уже не в первом ряду).
+    let heading: HTMLElement | null = null;
+    for (let sib = card.previousElementSibling as HTMLElement | null; sib; sib = sib.previousElementSibling as HTMLElement | null) {
+      if (sib.classList.contains("season-divider")) {
+        heading = sib;
+        break;
+      }
+      if (sib.offsetTop < top - 1) break; // сосед из ряда выше — не первый ряд сезона
+    }
+    const upTop = heading
+      ? heading.offsetTop - parseFloat(getComputedStyle(heading).marginTop || "0")
+      : top;
     let scroll = gridScroll.current;
     if (bottom + M > scroll + vh) scroll = bottom + M - vh;
-    if (top - M < scroll) scroll = top - M;
+    if (upTop - M < scroll) scroll = upTop - M;
     const maxScroll = Math.max(0, el.scrollHeight - vh);
     scroll = Math.max(0, Math.min(scroll, maxScroll));
     gridScroll.current = scroll;
@@ -352,10 +375,6 @@ export const EpisodeRail = memo(function EpisodeRail({
               <img className="finale-icon" src="/icons/final.svg" alt="" />
               <span className="finale-caption">Финал</span>
             </div>
-          ) : locked ? (
-            <div className="availability-overlay">
-              <img className="lock-icon" src="/icons/locked.svg" alt="По подписке" />
-            </div>
           ) : upcomingFree && recom ? (
             // Невышедшая бесплатная серия: вне фокуса — иконка часов, в фокусе —
             // колокольчик с предложением напомнить о выходе
@@ -370,10 +389,8 @@ export const EpisodeRail = memo(function EpisodeRail({
               )}
             </div>
           ) : current ? (
-            // Серия «в эфире»: на постере контур плея (пропадает в фокусе)
-            <div className="availability-overlay onair-overlay">
-              <img className="onair-poster-icon" src="/icons/onair-poster.svg" alt="Сейчас в эфире" />
-            </div>
+            // Играющая сейчас серия: без плей-иконки и без затемнения постера
+            null
           ) : episode.availability !== "available" ? (
             // «Без рекома» (и «Недоступно»): подпись поверх постера, как раньше
             <div className="availability-overlay">{availabilityLabel(episode)}</div>
@@ -415,8 +432,11 @@ export const EpisodeRail = memo(function EpisodeRail({
   // затем его серии со сквозным railindex (после карточки подписки, если есть).
   const renderContinuousSeasons = () => {
     const seasons = gridSeasons ?? [];
+    // Заголовок «N сезон» пишем у каждого сезона (в т.ч. первого), т.к. табы
+    // теперь только номера. При единственном сезоне заголовок не нужен.
+    const showHeadings = seasons.length > 1;
     let flat = lead;
-    return seasons.map((s, si) => {
+    return seasons.map((s) => {
       const cards = s.episodes.map((ep, i) => {
         const idx = flat;
         flat += 1;
@@ -424,8 +444,7 @@ export const EpisodeRail = memo(function EpisodeRail({
       });
       return (
         <Fragment key={`season-${s.number}`}>
-          {/* Разделитель — между сезонами (перед первым не нужен: его показывает таб) */}
-          {si > 0 ? <div className="season-divider">{s.number} сезон</div> : null}
+          {showHeadings ? <div className="season-divider">{s.number} сезон</div> : null}
           {cards}
         </Fragment>
       );
@@ -442,8 +461,13 @@ export const EpisodeRail = memo(function EpisodeRail({
         {grid ? (
           <>
             {subCard ? renderSubCard(focusedIndex === 0) : null}
-            {/* Вертикаль 1 — непрерывная лента (gridSeasons); Вертикаль 2 — только
-                серии активного сезона (обычный список с тем же railindex) */}
+            {/* «Раздельный»: заголовок сезона первым элементом грида — скроллится
+                вместе с постерами. В непрерывной ленте (gridSeasons) не нужен. */}
+            {!gridSeasons && leadHeading ? (
+              <div className="season-divider">{leadHeading}</div>
+            ) : null}
+            {/* Вертикаль 1 — непрерывная лента (gridSeasons); Вертикаль 2 / «Раздельный»
+                — только серии активного сезона (обычный список с тем же railindex) */}
             {gridSeasons
               ? renderContinuousSeasons()
               : episodes.map((episode, i) =>

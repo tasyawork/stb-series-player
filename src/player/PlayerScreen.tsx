@@ -48,9 +48,11 @@ type PanelOption = { kind: "quality" | "audio" | "subtitle"; value: string };
 // Вариант прототипа: "plain" — базовый, "recom" — с рекомендациями.
 // Пока оба ведут себя одинаково; крючок для будущих правок второго варианта.
 // "vertical" пока ведёт себя как plain — ветки редизайна завязаны на "recom"
-// "vertical" — Вертикаль 1 (табы сверху, непрерывная лента всех сезонов),
+// "vertical" — «Сквозной»: табы сверху, непрерывная лента всех сезонов,
+// "split"    — «Раздельный»: табы сверху, но в каждом табе только серии
+//              выбранного сезона (сквозной ленты нет),
 // "vertical2" — Вертикаль 2 (табы слева, посезонно, вертикальный скролл)
-type PlayerVariant = "plain" | "recom" | "vertical" | "vertical2";
+type PlayerVariant = "plain" | "recom" | "vertical" | "vertical2" | "split";
 
 // Тип контента: сериал (серии с табами сезонов) или фильм (две галереи)
 type PlayerContent = "series" | "film";
@@ -262,18 +264,19 @@ function PlayerScreenView({
   //  gridTop  (Вертикаль 1): табы сверху, непрерывная лента всех сезонов;
   //  gridLeft (Вертикаль 2): табы слева, посезонно (прежняя раскладка).
   const gridTop = content === "series" && variant === "vertical";
+  // «Раздельный»: раскладка как у gridTop (табы сверху), но серии только
+  // выбранного сезона — без сквозной ленты всех сезонов.
+  const gridSplit = content === "series" && variant === "split";
   const gridLeft = content === "series" && variant === "vertical2";
-  const gridLayout = gridTop || gridLeft;
+  // Табы сверху (общая раскладка «Сквозной» и «Раздельный»)
+  const topTabs = gridTop || gridSplit;
+  const gridLayout = gridTop || gridSplit || gridLeft;
   const GRID_COLUMNS = 4;
-  // Платный тайтл без активной подписки: перед первой серией — карточка подписки.
-  // Она занимает ячейку 0 ряда, сдвигая индексы реальных серий на subOffset.
-  const showSubCard =
-    (isRecom || gridLayout) &&
-    series.subscriptionRequired &&
-    !series.subscriptionActive;
-  const subOffset = showSubCard ? 1 : 0;
-  const SUB_NAME = "ИВИ + Амедиатека";
-  const SUB_PRICE = "399 ₽";
+  // Баннер подписки перед первой серией убран во всех вариантах и состояниях.
+  const showSubCard = false;
+  const subOffset = 0;
+  const SUB_NAME = "";
+  const SUB_PRICE = "";
   /*
     Вертикальная сетка — непрерывная лента всех сезонов: серии всех сезонов идут
     подряд, между сезонами — заголовок-разделитель «N сезон». Индекс ряда
@@ -777,6 +780,17 @@ function PlayerScreenView({
       if (event.key === "Escape" || event.key === "Backspace" || event.key === "Delete") {
         event.preventDefault();
         if (browsing) {
+          // «Раздельный»: бэк всегда закрывает шторку серий и возвращает в плеер
+          if (gridSplit) {
+            setFocus("pause");
+            return;
+          }
+          // «Сквозной»: первый бэк — на таб актуального сезона,
+          // второй (уже с таба) — обратно в плеер
+          if (gridTop) {
+            setFocus(focus === "seasons" ? "pause" : "seasons");
+            return;
+          }
           const origin = browseOriginRef.current;
           const movedFromOrigin =
             origin && (activeSeason !== origin.season || railIndex !== origin.index);
@@ -815,6 +829,13 @@ function PlayerScreenView({
             setRailIndex(next);
             const s = seasonAtRail(next);
             if (s !== activeSeason) setActiveSeason(s);
+            return;
+          }
+          if (gridSplit) {
+            // «Раздельный»: вправо/влево — соседняя карточка в пределах сезона,
+            // без ухода к табам (табы сверху) и без смены сезона
+            const total = railCount;
+            setRailIndex((value) => Math.max(0, Math.min(total - 1, value + step)));
             return;
           }
           if (gridLeft) {
@@ -903,8 +924,9 @@ function PlayerScreenView({
             }
             return;
           }
-          if (gridLeft && focus === "episodes") {
-            // Вертикаль 2: вниз — на ряд ниже (+колонки), с обработкой неполного ряда
+          if ((gridLeft || gridSplit) && focus === "episodes") {
+            // Вертикаль 2 / «Раздельный»: вниз — на ряд ниже (+колонки),
+            // с обработкой неполного ряда, в пределах сезона
             const total = railCount;
             setRailIndex((value) => {
               const below = value + GRID_COLUMNS;
@@ -917,8 +939,8 @@ function PlayerScreenView({
             });
             return;
           }
-          if (gridTop && focus === "seasons") {
-            // Вертикаль 1: табы сверху — вниз в сетку серий
+          if (topTabs && focus === "seasons") {
+            // «Сквозной»/«Раздельный»: табы сверху — вниз в сетку серий
             setFocus("episodes");
             return;
           }
@@ -966,14 +988,20 @@ function PlayerScreenView({
           }
           return;
         }
+        if (gridSplit && focus === "episodes") {
+          // «Раздельный»: вверх — на ряд выше; из верхнего ряда — на табы сверху
+          if (railIndex >= GRID_COLUMNS) setRailIndex((value) => value - GRID_COLUMNS);
+          else setFocus("seasons");
+          return;
+        }
         if (gridLeft && focus === "episodes") {
           // Вертикаль 2: вверх — на ряд выше; из верхнего ряда — на таймлайн
           if (railIndex >= GRID_COLUMNS) setRailIndex((value) => value - GRID_COLUMNS);
           else setFocus("seek");
           return;
         }
-        if (gridTop && focus === "seasons") {
-          // Вертикаль 1: табы сверху — вверх обратно на таймлайн плеера
+        if (topTabs && focus === "seasons") {
+          // «Сквозной»/«Раздельный»: табы сверху — вверх обратно на таймлайн плеера
           setFocus("seek");
           return;
         }
@@ -1155,9 +1183,9 @@ function PlayerScreenView({
         <div
           className={`series-layer${browsing ? " open" : ""}${
             isRecom && focus === "recom" ? " raised" : ""
-          }${gridLayout ? " grid-layout" : ""}${gridTop ? " grid-top" : ""}${
+          }${gridLayout ? " grid-layout" : ""}${topTabs ? " grid-top" : ""}${
             gridLeft ? " grid-left" : ""
-          }${gridTop && gridScrolled ? " grid-scrolled" : ""}${
+          }${topTabs && gridScrolled ? " grid-scrolled" : ""}${
             isFilm && filmVertical ? " film-vertical" : ""
           }`}
         >
@@ -1174,6 +1202,8 @@ function PlayerScreenView({
             </div>
           ) : (
             <>
+              {/* Табы сезонов показываем во всех вариантах и всегда, включая
+                  единственный сезон (тогда это один таб «Сезон 1»). */}
               <SeasonTabs
                 seasons={series.seasons}
                 activeSeason={activeSeason}

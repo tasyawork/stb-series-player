@@ -768,13 +768,29 @@ input {
   color: var(--color-sofala);
 }
 
-/* SegmentControlItem из Figma «компоненты»: помельче, пилюля обтягивает название.
-   Заливка появляется только у активного (серая) и у сфокусированного (фуксия). */
+/* Статичная подпись «Сезон» слева от ряда табов-номеров (новый вид) */
+.season-tabs-label {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  margin-right: 8px;
+  /* Тот же размер, что и заголовок сезона «N сезон» — во всех вариантах */
+  font-size: var(--typo-title-size);
+  line-height: var(--typo-title-line);
+  font-weight: 700;
+  color: var(--color-sofala);
+  white-space: nowrap;
+}
+
+/* Новый вид таба сезона: номер в скруглённом квадрате. Состояния компонента
+   сохранены как раньше: Default — прозрачный, Selected (активный сезон) — серая
+   заливка, Focused (в фокусе пульта) — фуксия. */
 .segment-item {
-  height: 36px;
+  min-width: 44px;
+  height: 44px;
   border: 0;
-  border-radius: 12px;
-  padding: 7px 15px;
+  border-radius: 14px;
+  padding: 0 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -782,9 +798,9 @@ input {
   overflow: hidden;
   background: transparent;
   color: var(--color-sofia);
-  font-size: 16px;
-  line-height: 22px;
-  font-weight: 500;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 700;
   white-space: nowrap;
   cursor: pointer;
   transition: background var(--duration-focus) ease, color var(--duration-focus) ease;
@@ -838,7 +854,9 @@ input {
   left: 68px;
   width: var(--row-w);
   gap: 16px;
-  top: 452px;
+  /* Закрытая шторка: снизу выглядывают верхушки постеров ровно на 32px.
+     Значение учитывает место под скрытые (opacity:0) табы над сеткой. */
+  top: 448px;
 }
 
 .series-layer.grid-top.open {
@@ -907,6 +925,12 @@ input {
   line-height: var(--typo-title-line);
   font-weight: 700;
   color: var(--color-sofala);
+}
+
+/* Закрытая шторка: заголовки сезонов скрыты, чтобы снизу выглядывали именно
+   верхушки постеров, а не строка «N сезон». */
+.series-layer.grid-top:not(.open) .season-divider {
+  display: none;
 }
 
 /* ===== Вертикаль 2 (.grid-left): табы слева колонкой, серии посезонно ===== */
@@ -1192,9 +1216,9 @@ input {
   background: #000;
 }
 
-.episode-card.availability-upcoming .poster > img,
-.episode-card.availability-unavailable .poster > img,
-.episode-card.locked .poster > img {
+/* Затемняем постер только у ещё не вышедших серий. У недоступного/подписочного
+   контента постер показываем как есть — без затемнения и без замка. */
+.episode-card.availability-upcoming .poster > img {
   opacity: var(--opacity-akbu);
 }
 
@@ -1240,9 +1264,8 @@ input {
   opacity: 1;
 }
 
-/* Просмотренная и начатая серия: постер затемнён, по центру глазик.
-   У просмотренных затемнение чуть сильнее */
-.episode-card.watched .poster::after,
+/* Начатая серия: постер затемнён. Просмотренную больше НЕ затемняем —
+   она отличается только полной полосой прогресса (таймлайном). */
 .episode-card.started .poster::after {
   opacity: 0.62;
 }
@@ -1469,10 +1492,7 @@ input {
   transition: opacity var(--duration-focus) ease;
 }
 
-/* Активная серия: постер затемнён под плей-иконкой — и вне фокуса, и в фокусе */
-.episode-card.current .poster::after {
-  opacity: 0.4;
-}
+/* Играющая сейчас серия: постер НЕ затемняем (и плей-иконку не показываем) */
 
 .onair-overlay .onair-poster-icon {
   width: 20px;

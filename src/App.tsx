@@ -10,6 +10,8 @@ import { PlayerScreen } from "./player/PlayerScreen";
 
 // Вкладка «Фильм» показывает один конкретный фильм с его же рекомендациями
 const FILM_URL = "https://www.ivi.ru/watch/642536";
+// Вкладка «Дети» — мультсериал «Три кота» (обычный сериал, все три режима)
+const KIDS_URL = "https://www.ivi.ru/watch/tri-kota";
 
 const EXAMPLES = [
   { label: "Мало серий", q: "https://www.ivi.ru/watch/holod" },
@@ -25,21 +27,27 @@ const EXAMPLES = [
 
 // recom → «Горизонталь», vertical → «Вертикаль 1» (табы сверху, непрерывная лента),
 // vertical2 → «Вертикаль 2» (табы слева, посезонно, вертикальный скролл)
-type Mode = "plain" | "recom" | "vertical" | "vertical2";
-// Правый переключатель: сериал (текущий прототип) или фильм (две галереи)
-type Content = "series" | "film";
+// split → «Раздельный» (пока рендерится так же, как vertical/«Сквозной», доделаем позже)
+// Сейчас в UI показаны только «Сквозной» (vertical) и «Раздельный» (split);
+// остальные режимы скрыты, но оставлены в коде.
+type Mode = "plain" | "recom" | "vertical" | "vertical2" | "split";
+// Левый переключатель контента: сериал / фильм (две галереи) / дети (мультсериал)
+type Content = "series" | "film" | "kids";
 
 export function App() {
   const [query, setQuery] = useState(EXAMPLES[0].q);
   const [loaded, setLoaded] = useState(EXAMPLES[0].q);
-  // Вкладка прототипа: «Горизонтальный» (recom) / «Вертикальный»
-  const [mode, setMode] = useState<Mode>("recom");
+  // Вкладка прототипа. По умолчанию «Сквозной» (vertical), т.к. остальные
+  // режимы сейчас скрыты в UI.
+  const [mode, setMode] = useState<Mode>("vertical");
   // Тип контента: «Сериал» / «Фильм». В фильме вместо серий — две галереи
   const [content, setContent] = useState<Content>("series");
   // Раскладка фильма: «Горизонталь» (две ленты) / «Вертикаль» (вторая галерея сеткой вниз)
   const [filmVertical, setFilmVertical] = useState(false);
   // Фильм для вкладки «Фильм» грузится один раз и отдельно от сериала-пресета
   const [film, setFilm] = useState<IviSeries | null>(null);
+  // Детский мультсериал «Три кота» — грузится лениво при первом заходе на вкладку
+  const [kids, setKids] = useState<IviSeries | null>(null);
   // Подсветка чипа не ждёт сеть: выбор виден в том же кадре, что клик
   const [selected, setSelected] = useState(EXAMPLES[0].q);
   const [loading, setLoading] = useState(true);
@@ -102,11 +110,28 @@ export function App() {
     };
   }, [content, film]);
 
+  // «Три кота» грузим лениво — при первом переходе на вкладку «Дети»
+  useEffect(() => {
+    if (content !== "kids" || kids) return;
+    let cancelled = false;
+    void fetchIviSeries(KIDS_URL, undefined, true).then(
+      (loaded) => {
+        if (!cancelled) setKids(loaded);
+      },
+      () => {
+        // Не загрузился — вкладка просто останется на спиннере
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [content, kids]);
+
   // Ссылка на плеер должна быть стабильной, иначе memo на нём ничего не даёт
   const returnFocusToInput = useCallback(() => inputRef.current?.focus(), []);
 
-  // Какой контент отдать плееру: сериал-пресет или загруженный фильм
-  const shown = content === "film" ? film : series;
+  // Какой контент отдать плееру: сериал-пресет, фильм или детский мультсериал
+  const shown = content === "film" ? film : content === "kids" ? kids : series;
 
   return (
     <div className="app-shell">
@@ -115,7 +140,7 @@ export function App() {
         но место под неё остаётся — иначе плеер и кнопки (спозиционированы
         относительно .player-region) прыгали бы вверх при переключении.
       */}
-      <div className={`picker expanded${content === "film" ? " picker-hidden" : ""}`}>
+      <div className={`picker expanded${content !== "series" ? " picker-hidden" : ""}`}>
           <div className="picker-plate">
             <div className="picker-items">
               <div className="preset-chips">
@@ -156,32 +181,29 @@ export function App() {
       {error ? <div className="search-error">{error}</div> : null}
 
       <div className="player-region">
-        {/* Реком-настройка есть только у сериала — в фильме её не показываем */}
-        {content === "series" ? (
+        {/* Три режима — у сериала и у детей; у фильма свой переключатель раскладки */}
+        {content !== "film" ? (
           <div className="mode-switch" role="group" aria-label="Вариант прототипа">
-            <button
-              type="button"
-              className={`mode-btn${mode === "recom" ? " active" : ""}`}
-              aria-pressed={mode === "recom"}
-              onClick={() => setMode("recom")}
-            >
-              Горизонталь
-            </button>
+            {/*
+              Скрытые режимы (оставлены в коде на будущее):
+              «Горизонталь» (recom) и «Вертикаль 2» (vertical2).
+              Сейчас показываем только «Сквозной» и «Раздельный».
+            */}
             <button
               type="button"
               className={`mode-btn${mode === "vertical" ? " active" : ""}`}
               aria-pressed={mode === "vertical"}
               onClick={() => setMode("vertical")}
             >
-              Вертикаль 1
+              Сквозной
             </button>
             <button
               type="button"
-              className={`mode-btn${mode === "vertical2" ? " active" : ""}`}
-              aria-pressed={mode === "vertical2"}
-              onClick={() => setMode("vertical2")}
+              className={`mode-btn${mode === "split" ? " active" : ""}`}
+              aria-pressed={mode === "split"}
+              onClick={() => setMode("split")}
             >
-              Вертикаль 2
+              Раздельный
             </button>
           </div>
         ) : (
@@ -206,6 +228,10 @@ export function App() {
         )}
 
         <div className="content-switch" role="group" aria-label="Тип контента">
+          {/*
+            Табы «Фильм» и «Дети» скрыты (оставлены в коде на будущее).
+            Сейчас доступен только «Сериал».
+          */}
           <button
             type="button"
             className={`mode-btn${content === "series" ? " active" : ""}`}
@@ -214,24 +240,17 @@ export function App() {
           >
             Сериал
           </button>
-          <button
-            type="button"
-            className={`mode-btn${content === "film" ? " active" : ""}`}
-            aria-pressed={content === "film"}
-            onClick={() => setContent("film")}
-          >
-            Фильм
-          </button>
         </div>
 
         <div className="player-stage">
         {shown ? (
           <PlayerScreen
-            key={`${content === "film" ? FILM_URL : loaded}::${mode}::${content}::${
-              filmVertical ? "v" : "h"
-            }`}
+            key={`${
+              content === "film" ? FILM_URL : content === "kids" ? KIDS_URL : loaded
+            }::${mode}::${content}::${filmVertical ? "v" : "h"}`}
             variant={mode}
-            content={content}
+            /* «Дети» — это обычный сериал: раскладка серий и те же три режима */
+            content={content === "kids" ? "series" : content}
             filmVertical={content === "film" && filmVertical}
             series={shown}
             onExit={returnFocusToInput}
@@ -243,7 +262,7 @@ export function App() {
             плеера, поэтому загрузка выглядит одним непрерывным состоянием
           */
           <div className="player-wrap">
-            {loading || (content === "film" && !film) ? (
+            {loading || (content === "film" && !film) || (content === "kids" && !kids) ? (
               <div className="player-loader" role="presentation" aria-hidden="true">
                 <i className="player-spinner" />
               </div>
